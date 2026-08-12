@@ -28,7 +28,11 @@
   --shadow:0 1px 6px rgba(120,110,100,.07);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
-.tab,.row,.grip,.sec-label,.chip,.fchip{-webkit-user-select:none;user-select:none;}
+.tab,.row,.tagrow,.grip,.sec-label,.chip,.fchip{
+  -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+}
+/* 長押しの起点。ブラウザにスクロール操作を横取りさせない */
+.grip{touch-action:none;}
 html,body{margin:0;padding:0;}
 body{
   font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
@@ -37,6 +41,7 @@ body{
   overscroll-behavior-y:contain;
 }
 body.dragging{overflow:hidden;}
+body.dragging .sheet{overflow:hidden;}   /* 並べ替え中はシートもスクロールさせない */
 
 /* ---------- header ---------- */
 header{
@@ -196,7 +201,12 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
 /* ---------- tag editor ---------- */
 .group[data-group="tags"]{background:none;box-shadow:none;overflow:visible;border-radius:0;}
 .tagrow{
-  display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:2px 2px;background:var(--card);
+  display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:11px 2px;background:var(--card);
+}
+/* ⋮⋮ は指で掴めるだけの当たり判定を持たせる */
+.tagrow > .grip{
+  width:30px;min-height:34px;display:flex;align-items:center;justify-content:center;
+  margin:-11px 0;font-size:14px;
 }
 .tagrow.drag-active{
   border-radius:10px;outline:1.5px solid var(--accent-light);
@@ -805,12 +815,19 @@ function attachDrag(el){
       el.removeEventListener('pointercancel', cancel);
       el.removeEventListener('pointermove', moveCancel);
     };
-    const moveCancel = ev => { if(Math.abs(ev.clientY - e.clientY) > 8) cancel(); };
+    // 指は静止していても数px揺れるので、判定はやや緩め
+    const moveCancel = ev => { if(Math.abs(ev.clientY - e.clientY) > 12) cancel(); };
     el.addEventListener('pointerup', cancel);
     el.addEventListener('pointercancel', cancel);
     el.addEventListener('pointermove', moveCancel);
   });
 }
+
+/* スマホでは pointermove の preventDefault ではスクロールを止められないので、
+   touchmove を非パッシブで拾って止める（これが無いと指を動かした瞬間に
+   画面がスクロールし、ドラッグが pointercancel で中断される） */
+function blockTouch(e){ if(drag) e.preventDefault(); }
+function blockMenu(e){ if(drag) e.preventDefault(); }
 
 function startDrag(el){
   drag = { el, group: el.parentElement };
@@ -818,6 +835,8 @@ function startDrag(el){
   document.body.classList.add('dragging');
   if(navigator.vibrate) navigator.vibrate(12);
   document.addEventListener('pointermove', onDragMove, {passive:false});
+  document.addEventListener('touchmove', blockTouch, {passive:false});
+  document.addEventListener('contextmenu', blockMenu);
   document.addEventListener('pointerup', endDrag);
   document.addEventListener('pointercancel', endDrag);
 }
@@ -844,6 +863,8 @@ function endDrag(){
   drag.el.classList.remove('drag-active');
   document.body.classList.remove('dragging');
   document.removeEventListener('pointermove', onDragMove);
+  document.removeEventListener('touchmove', blockTouch);
+  document.removeEventListener('contextmenu', blockMenu);
   document.removeEventListener('pointerup', endDrag);
   document.removeEventListener('pointercancel', endDrag);
   commitOrder(drag.group);
