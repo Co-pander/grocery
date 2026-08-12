@@ -91,8 +91,8 @@ main{padding:10px 12px 96px;max-width:640px;margin:0 auto;}
   outline:1.5px solid var(--accent-light);z-index:5;
 }
 .tag{
-  font-size:10px;padding:2px 7px;border-radius:999px;
-  font-weight:700;flex:none;max-width:38%;
+  font-size:13px;padding:3px 10px;border-radius:999px;
+  font-weight:700;flex:none;max-width:42%;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .grip{color:var(--faint);font-size:12px;flex:none;letter-spacing:-1px;}
@@ -183,7 +183,8 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
   font-size:12px;padding:6px 13px;border-radius:999px;border:1px solid transparent;
   font-weight:700;cursor:pointer;
 }
-.chip.sel{border-color:var(--text);}
+/* 選択枠は濃いグレーだとタグの色まで暗く見えるので、アクセント色にする */
+.chip.sel{border-color:var(--accent);}
 .chip.edit{
   background:none;border:1.5px dashed var(--faint);color:var(--muted);
   font-family:inherit;
