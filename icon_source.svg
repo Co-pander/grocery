@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="check" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#dd6d52"/>
+      <stop offset="1" stop-color="#f3ab8c"/>
+    </linearGradient>
+    <linearGradient id="box" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#cfd2d4"/>
+      <stop offset="1" stop-color="#e3e5e6"/>
+    </linearGradient>
+  </defs>
+  <!-- チェックボックスの枠 -->
+  <rect x="58" y="96" width="330" height="330" rx="26"
+        fill="none" stroke="url(#box)" stroke-width="40"/>
+  <!-- はみ出すチェックマーク -->
+  <path d="M124 244 L216 336 L452 84"
+        fill="none" stroke="url(#check)" stroke-width="52"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

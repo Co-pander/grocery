@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#faf8f4">
+<title>お買い物リスト</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icon/icon-192.png">
+<link rel="apple-touch-icon" href="icon/icon-180.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="買い物リスト">
+<style>
+:root{
+  --bg:#faf8f4;              /* 生成りの紙色 */
+  --card:#ffffff;
+  --line:#eae5db;
+  --text:#54504a;
+  --muted:#aca69a;
+  --faint:#cdc6b8;           /* 空のチェックボックスの線 */
+  --accent:#e5876a;          /* アイコンのコーラル */
+  --accent-light:#f3ab8c;
+  --accent-soft:#fbeee8;
+  --accent-ink:#ffffff;
+  --grad:linear-gradient(135deg,#f3ab8c 0%,#e0745a 100%);
+  --shadow:0 1px 6px rgba(120,110,100,.07);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+.tab,.row,.grip,.sec-label,.chip,.fchip{-webkit-user-select:none;user-select:none;}
+html,body{margin:0;padding:0;}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif;
+  background:var(--bg);color:var(--text);
+  padding-bottom:env(safe-area-inset-bottom);
+  overscroll-behavior-y:contain;
+}
+body.dragging{overflow:hidden;}
+
+/* ---------- header ---------- */
+header{
+  position:sticky;top:0;z-index:20;
+  background:var(--bg);color:var(--text);
+  padding:calc(env(safe-area-inset-top) + 12px) 14px 0;
+  border-bottom:1px solid var(--line);
+}
+.hd-row{display:flex;align-items:center;gap:8px;}
+.hd-title{font-size:16px;font-weight:700;flex:1;letter-spacing:.06em;}
+.hd-btn{
+  background:none;border:1px solid var(--line);color:var(--muted);
+  font-size:11.5px;padding:6px 12px;border-radius:999px;font-weight:700;
+  font-family:inherit;
+}
+.hd-btn:active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent-light);}
+.tabs{display:flex;margin-top:10px;}
+.tab{
+  flex:1;text-align:center;padding:10px 0 9px;font-size:13.5px;font-weight:700;
+  color:var(--muted);border-bottom:2px solid transparent;cursor:pointer;
+  margin-bottom:-1px;
+}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent);}
+
+/* ---------- list ---------- */
+main{padding:10px 12px 96px;max-width:640px;margin:0 auto;}
+.sec-label{
+  font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.08em;
+}
+/* TODOリスト風：枠やカードを持たず、罫線だけで並べる */
+.group{background:none;}
+.row{
+  display:flex;align-items:center;gap:8px;
+  padding:4px 4px;
+  border-bottom:1px solid var(--line);
+  background:var(--bg);position:relative;
+}
+.group > .row:last-child{border-bottom:0;}
+.row .name{
+  flex:1;font-size:14px;color:var(--muted);line-height:1.35;padding:3px 0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.row.planned .name{color:var(--text);font-weight:600;}
+.row.bought .name{text-decoration:line-through;color:var(--muted);}
+.row.drag-active{
+  border-radius:8px;box-shadow:0 4px 14px rgba(120,110,100,.25);
+  outline:1.5px solid var(--accent-light);z-index:5;
+}
+.tag{
+  font-size:10px;padding:2px 7px;border-radius:999px;
+  font-weight:700;flex:none;max-width:38%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.grip{color:var(--faint);font-size:12px;flex:none;letter-spacing:-1px;}
+.row-x{
+  background:none;border:0;color:var(--faint);font-size:13px;
+  flex:none;padding:4px 2px 4px 6px;font-family:inherit;line-height:1;
+}
+.row-x:active{color:#b9705c;}
+.group.filtered .grip{visibility:hidden;}
+
+/* アイコンに合わせた角丸の四角いチェックボックス */
+.chk{
+  width:21px;height:21px;border-radius:5px;flex:none;
+  border:1.5px solid var(--faint);background:transparent;
+  display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;color:transparent;padding:0;line-height:1;
+}
+/* 買う予定：アイコンと同じ「薄い枠＋コーラルのチェック」 */
+.chk.on-plan{border-color:var(--faint);color:var(--accent);}
+/* 買った：塗りつぶし */
+.chk.on-buy{border-color:transparent;background:var(--grad);color:#fff;}
+.chk:disabled{opacity:.45;}
+
+.empty{text-align:center;color:var(--muted);font-size:13px;padding:48px 20px;line-height:1.9;}
+
+/* ---------- タグ絞り込み ---------- */
+.sec-head{display:flex;align-items:center;gap:8px;margin:14px 4px 5px;}
+.sec-head:first-child{margin-top:2px;}
+.sec-head .sec-label{flex:1;}
+.filter-btn{
+  background:none;border:0;font-size:11px;font-weight:700;
+  color:var(--muted);padding:3px 6px;font-family:inherit;
+}
+.filter-btn.on{color:var(--accent);}
+.fbar{
+  display:flex;gap:6px;overflow-x:auto;
+  padding:0 4px 7px;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+}
+.fbar::-webkit-scrollbar{display:none;}
+.fchip{
+  font-size:11.5px;font-weight:700;padding:5px 11px;border-radius:999px;
+  border:1px solid var(--line);background:var(--card);color:var(--muted);
+  white-space:nowrap;flex:none;font-family:inherit;
+}
+.fchip.on{border-color:transparent;}
+.fchip.all.on{background:var(--accent);color:#fff;}
+.filter-note{font-size:10.5px;color:var(--muted);margin:5px 4px 0;}
+
+/* ---------- history ---------- */
+.hist-date{
+  font-size:12.5px;font-weight:700;color:var(--accent);
+  margin:16px 4px 5px;
+}
+
+/* ---------- FAB ---------- */
+.fab{
+  position:fixed;right:18px;bottom:calc(18px + env(safe-area-inset-bottom));
+  width:54px;height:54px;border-radius:17px;border:0;
+  background:var(--grad);color:#fff;font-size:28px;line-height:1;
+  box-shadow:0 4px 14px rgba(200,120,90,.35);z-index:30;
+}
+.fab:active{transform:scale(.94);}
+
+/* ---------- sheet ---------- */
+.mask{
+  position:fixed;inset:0;background:rgba(90,86,78,.35);z-index:40;
+  display:flex;align-items:flex-end;justify-content:center;
+}
+.mask#tagMask{z-index:50;}
+.mask.hidden{display:none;}
+.sheet{
+  background:var(--card);width:100%;max-width:640px;
+  border-radius:18px 18px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));
+  max-height:86vh;overflow:auto;animation:up .2s ease;
+}
+@keyframes up{from{transform:translateY(24px);opacity:.4}to{transform:none;opacity:1}}
+.sheet h2{font-size:15px;margin:0 0 14px;}
+.fld{margin-bottom:14px;}
+.fld label{display:block;font-size:11.5px;color:var(--muted);font-weight:700;margin-bottom:6px;letter-spacing:.06em;}
+input[type=text]{
+  width:100%;padding:10px 12px;font-size:15px;border:1px solid var(--line);
+  border-radius:10px;background:#fbfaf8;font-family:inherit;color:var(--text);
+}
+input[type=text]::placeholder{color:var(--faint);}
+input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--accent);}
+.chips{display:flex;flex-wrap:wrap;gap:7px;align-items:center;}
+.chip{
+  font-size:12px;padding:6px 13px;border-radius:999px;border:1px solid transparent;
+  font-weight:700;cursor:pointer;
+}
+.chip.sel{border-color:var(--text);}
+.chip.edit{
+  background:none;border:1.5px dashed var(--faint);color:var(--muted);
+  font-family:inherit;
+}
+.btns{display:flex;gap:9px;margin-top:6px;}
+.btn{
+  flex:1;padding:12px;border-radius:11px;border:0;font-size:14.5px;font-weight:700;
+  font-family:inherit;
+}
+.btn.primary{background:var(--grad);color:#fff;}
+.btn.ghost{background:#f2efe9;color:var(--muted);}
+.btn.danger{background:var(--accent-soft);color:#c0664a;}
+.btn:active{opacity:.75;}
+
+/* ---------- tag editor ---------- */
+.group[data-group="tags"]{background:none;box-shadow:none;overflow:visible;border-radius:0;}
+.tagrow{
+  display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:2px 2px;background:var(--card);
+}
+.tagrow.drag-active{
+  border-radius:10px;outline:1.5px solid var(--accent-light);
+  box-shadow:0 4px 14px rgba(120,110,100,.25);z-index:5;
+}
+.tagrow input[type=text]{flex:1;padding:6px 9px;font-size:14px;border-color:transparent;background:#fbfaf8;}
+/* 色見本（タップで下にカラーピッカーが開く） */
+.swatch{
+  width:28px;height:28px;padding:0;border:0;border-radius:8px;
+  flex:none;position:relative;
+}
+.tagrow.open .swatch::after{
+  content:'';position:absolute;left:50%;bottom:-6px;transform:translateX(-50%);
+  border:4px solid transparent;border-bottom-color:var(--faint);
+}
+.picker{flex-basis:100%;display:none;padding:10px 4px 14px 36px;}
+.tagrow.open .picker{display:block;}
+.sl{display:flex;align-items:center;gap:8px;margin-bottom:14px;}
+.sl:last-child{margin-bottom:0;}
+.sl > span{font-size:10px;color:var(--muted);width:32px;flex:none;font-weight:700;}
+.picker input[type=range]{
+  flex:1;-webkit-appearance:none;appearance:none;
+  height:12px;border-radius:6px;border:0;margin:0;padding:0;
+}
+.picker input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:18px;height:18px;border-radius:50%;
+  background:#fff;border:1px solid #d8d4cc;box-shadow:0 1px 3px rgba(90,86,78,.35);
+}
+.picker input[type=range]::-moz-range-thumb{
+  width:18px;height:18px;border-radius:50%;
+  background:#fff;border:1px solid #d8d4cc;box-shadow:0 1px 3px rgba(90,86,78,.35);
+}
+.icon-btn{background:none;border:0;color:var(--faint);font-size:15px;padding:4px 6px;}
+.hint{font-size:11.5px;color:var(--muted);line-height:1.7;margin:12px 2px 0;}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hd-row">
+    <div class="hd-title">お買い物リスト</div>
+    <button class="hd-btn" id="btnTags">タグ</button>
+    <button class="hd-btn" id="btnReset">リセット</button>
+  </div>
+  <div class="tabs">
+    <div class="tab active" data-tab="list">リスト</div>
+    <div class="tab" data-tab="hist">履歴</div>
+  </div>
+</header>
+
+<main>
+  <div id="viewList"></div>
+  <div id="viewHist" style="display:none"></div>
+</main>
+
+<button class="fab" id="fab">＋</button>
+
+<!-- アイテム登録／編集 -->
+<div class="mask hidden" id="itemMask">
+  <div class="sheet">
+    <h2 id="itemTitle">アイテムを登録</h2>
+    <div class="fld">
+      <label>アイテム名</label>
+      <input type="text" id="itemName" placeholder="例：トイレットペーパー" autocomplete="off">
+    </div>
+    <div class="fld">
+      <label>タグ</label>
+      <div class="chips" id="itemTags"></div>
+    </div>
+    <div class="btns">
+      <button class="btn ghost" id="itemCancel">キャンセル</button>
+      <button class="btn primary" id="itemSave">保存</button>
+    </div>
+    <div class="btns" id="itemDelWrap" style="display:none">
+      <button class="btn danger" id="itemDel">このアイテムを削除</button>
+    </div>
+  </div>
+</div>
+
+<!-- タグ管理 -->
+<div class="mask hidden" id="tagMask">
+  <div class="sheet">
+    <h2>タグの編集</h2>
+    <div id="tagList"></div>
+    <div class="btns">
+      <button class="btn ghost" id="tagAdd">＋ タグを追加</button>
+      <button class="btn primary" id="tagClose">完了</button>
+    </div>
+    <p class="hint">長押しでドラッグすると並べ替えできます。<br>
+      名前と色はそのまま編集できます。名前が空のタグは閉じるときに削除されます。</p>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   データ
+   ========================================================= */
+const KEY = 'grocery.v1';
+let db = load();
+
+function load(){
+  try{
+    const s = JSON.parse(localStorage.getItem(KEY));
+    if(s && s.items) return s;
+  }catch(e){}
+  return {
+    tags:[
+      {id:'t1', name:'日用品', color:'#d7dde5'},
+      {id:'t2', name:'肉',     color:'#f2c5b6'},
+      {id:'t3', name:'魚',     color:'#c9dce4'},
+      {id:'t4', name:'野菜',   color:'#d0dabc'},
+      {id:'t5', name:'その他', color:'#e4ded1'}
+    ],
+    items:[],       // 登録順（＝初期状態の並び）
+    history:[]      // {id, itemId, date, name, tagId, order}
+  };
+}
+function save(){ localStorage.setItem(KEY, JSON.stringify(db)); }
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+const tagOf = id => db.tags.find(t=>t.id===id) || null;
+
+/* 表示順：買う予定（plannedOrder昇順）→ 登録リスト（登録順） */
+function ordered(){
+  const p = db.items.filter(i=>i.plannedOrder!=null).sort((a,b)=>a.plannedOrder-b.plannedOrder);
+  const r = db.items.filter(i=>i.plannedOrder==null);
+  return {planned:p, rest:r, all:p.concat(r)};
+}
+function today(){
+  const d = new Date(), z = n => String(n).padStart(2,'0');
+  return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate());
+}
+/* 背景色に対して読みやすい文字色 */
+function readable(hex){
+  const c = (hex||'#cccccc').replace('#','');
+  const n = c.length===3 ? c.split('').map(x=>x+x).join('') : c;
+  const r=parseInt(n.slice(0,2),16), g=parseInt(n.slice(2,4),16), b=parseInt(n.slice(4,6),16);
+  return (r*299+g*587+b*114)/1000 > 168 ? '#5b564e' : '#ffffff';
+}
+
+/* =========================================================
+   リスト描画
+   ========================================================= */
+const viewList = document.getElementById('viewList');
+const viewHist = document.getElementById('viewHist');
+
+const filters = { planned:new Set(), rest:new Set() };  // 空＝すべて表示
+const fbarOpen = { planned:false, rest:false };
+
+function renderList(){
+  const {planned, rest} = ordered();
+  viewList.innerHTML = '';
+  if(!db.items.length){
+    viewList.innerHTML =
+      '<div class="empty">右下の ＋ からアイテムを登録します。<br>' +
+      '左の□で「買う予定」、右の□で「買った」。</div>';
+    return;
+  }
+  if(planned.length) section('planned', '買う予定', planned);
+  if(rest.length)    section('rest',    '登録リスト', rest);
+}
+
+function section(kind, title, items){
+  const used = db.tags.filter(t => items.some(i=>i.tagId===t.id));
+  const noTag = items.some(i => !tagOf(i.tagId));
+  const sel = filters[kind];
+  [...sel].forEach(id => {
+    if(id === '__none' ? !noTag : !used.some(t=>t.id===id)) sel.delete(id);
+  });
+  const shown = sel.size
+    ? items.filter(i => sel.has(tagOf(i.tagId) ? i.tagId : '__none'))
+    : items;
+
+  const head = document.createElement('div');
+  head.className = 'sec-head';
+  const lab = document.createElement('div');
+  lab.className = 'sec-label';
+  lab.textContent = title + '（' + shown.length + (sel.size ? ' / ' + items.length : '') + '）';
+  head.appendChild(lab);
+
+  const many = used.length + (noTag?1:0) > 1;
+  if(many){
+    const fb = document.createElement('button');
+    fb.className = 'filter-btn' + (sel.size ? ' on' : '');
+    fb.textContent = (fbarOpen[kind] || sel.size) ? '▲ 絞り込み' : '▼ 絞り込み';
+    fb.onclick = () => { fbarOpen[kind] = !fbarOpen[kind]; renderList(); };
+    head.appendChild(fb);
+  }
+  viewList.appendChild(head);
+
+  if(many && (fbarOpen[kind] || sel.size)){
+    const bar = document.createElement('div');
+    bar.className = 'fbar';
+    const all = document.createElement('button');
+    all.className = 'fchip all' + (sel.size ? '' : ' on');
+    all.textContent = 'すべて';
+    all.onclick = () => { sel.clear(); renderList(); };
+    bar.appendChild(all);
+    const chip = (id, name, color) => {
+      const c = document.createElement('button');
+      const on = sel.has(id);
+      c.className = 'fchip' + (on ? ' on' : '');
+      c.textContent = name;
+      if(on){ c.style.background = color; c.style.color = readable(color); }
+      c.onclick = () => { on ? sel.delete(id) : sel.add(id); renderList(); };
+      bar.appendChild(c);
+    };
+    used.forEach(t => chip(t.id, t.name, t.color));
+    if(noTag) chip('__none', 'タグなし', '#d6d2ca');
+    viewList.appendChild(bar);
+  }
+
+  if(!shown.length){
+    const e = document.createElement('div');
+    e.className = 'filter-note';
+    e.textContent = '該当するアイテムはありません。';
+    viewList.appendChild(e);
+    return;
+  }
+
+  const g = group(kind);
+  if(sel.size) g.classList.add('filtered');
+  shown.forEach(i => g.appendChild(row(i, !sel.size)));
+  viewList.appendChild(g);
+
+  if(sel.size){
+    const n = document.createElement('div');
+    n.className = 'filter-note';
+    n.textContent = '※ 絞り込み中は並べ替えできません';
+    viewList.appendChild(n);
+  }
+}
+
+function group(name){
+  const d = document.createElement('div');
+  d.className = 'group'; d.dataset.group = name; return d;
+}
+function tagChip(t){
+  const c = document.createElement('span');
+  c.className = 'tag'; c.textContent = t.name || '（無名）';
+  c.style.background = t.color; c.style.color = readable(t.color);
+  return c;
+}
+
+function row(item, draggable){
+  const planned = item.plannedOrder != null;
+  const el = document.createElement('div');
+  el.className = 'row' + (planned?' planned':'') + (item.bought?' bought':'');
+  el.dataset.id = item.id;
+
+  const grip = document.createElement('span');
+  grip.className = 'grip'; grip.textContent = '⋮⋮';
+  el.appendChild(grip);
+
+  const name = document.createElement('div');
+  name.className = 'name'; name.textContent = item.name;
+  name.onclick = () => openItem(item);
+  el.appendChild(name);
+
+  const t = tagOf(item.tagId);
+  if(t) el.appendChild(tagChip(t));
+
+  const b1 = document.createElement('button');           // 左：買う予定
+  b1.className = 'chk' + (planned?' on-plan':'');
+  b1.textContent = '✓';
+  b1.onclick = () => togglePlan(item);
+  el.appendChild(b1);
+
+  const b2 = document.createElement('button');           // 右：買った
+  b2.className = 'chk' + (item.bought?' on-buy':'');
+  b2.textContent = '✓';
+  b2.disabled = !planned;
+  b2.onclick = () => toggleBuy(item);
+  el.appendChild(b2);
+
+  if(draggable) attachDrag(el);
+  return el;
+}
+
+/* =========================================================
+   チェック操作
+   ========================================================= */
+function togglePlan(item){
+  if(item.plannedOrder != null){
+    item.plannedOrder = null;
+    if(item.bought){ item.bought = false; removeHistory(item.id); }
+  }else{
+    // 新しくチェックしたものは「買う予定」の一番下に付く
+    const max = Math.max(0, ...db.items.filter(i=>i.plannedOrder!=null).map(i=>i.plannedOrder));
+    item.plannedOrder = max + 1;
+  }
+  save(); renderList();
+}
+function toggleBuy(item){
+  if(item.plannedOrder == null) return;
+  item.bought = !item.bought;
+  if(item.bought){
+    const idx = ordered().all.findIndex(i=>i.id===item.id);
+    const t = tagOf(item.tagId);
+    // 購入した時点のアイテム名・タグをそのまま保存する（あとでリスト側を編集しても履歴は変わらない）
+    db.history.push({
+      id:uid(), itemId:item.id, date:today(), order:idx,
+      name:item.name,
+      tagName: t ? t.name : null,
+      tagColor: t ? t.color : null
+    });
+  }else{
+    removeHistory(item.id);
+  }
+  save(); renderList();
+}
+function removeHistory(itemId){
+  const d = today();
+  db.history = db.history.filter(h => !(h.itemId===itemId && h.date===d));
+}
+
+document.getElementById('btnReset').onclick = () => {
+  if(!db.items.some(i=>i.plannedOrder!=null)) return;
+  if(!confirm('チェックをすべて外して、登録した初期状態に戻します。\n（履歴は残ります）')) return;
+  db.items.forEach(i=>{ i.plannedOrder = null; i.bought = false; });
+  save(); renderList();
+};
+
+/* =========================================================
+   履歴（日付ごとに並べ替え・削除ができる）
+   ========================================================= */
+function renderHist(){
+  viewHist.innerHTML = '';
+  if(!db.history.length){
+    viewHist.innerHTML = '<div class="empty">まだ履歴がありません。<br>右の□にチェックを入れると記録されます。</div>';
+    return;
+  }
+  const dates = [...new Set(db.history.map(h=>h.date))].sort().reverse();
+  dates.forEach(d=>{
+    const h = document.createElement('div');
+    h.className = 'hist-date';
+    h.textContent = d.replace(/-/g,'／');
+    viewHist.appendChild(h);
+
+    const g = group('hist:' + d);
+    db.history.filter(x=>x.date===d).sort((a,b)=>a.order-b.order).forEach(x=>{
+      const r = document.createElement('div');
+      r.className = 'row'; r.dataset.id = x.id;
+
+      const grip = document.createElement('span');
+      grip.className='grip'; grip.textContent='⋮⋮';
+      r.appendChild(grip);
+
+      const n = document.createElement('div');
+      n.className = 'name'; n.textContent = x.name;
+      n.style.color = 'var(--text)';
+      r.appendChild(n);
+
+      // 購入時に保存したタグ（古い記録は tagId から補完）
+      const t = x.tagName ? {name:x.tagName, color:x.tagColor} : tagOf(x.tagId);
+      if(t) r.appendChild(tagChip(t));
+
+      const del = document.createElement('button');
+      del.className = 'row-x';
+      del.textContent = '✕';
+      del.onclick = () => delHistory(x);
+      r.appendChild(del);
+
+      attachDrag(r);
+      g.appendChild(r);
+    });
+    viewHist.appendChild(g);
+  });
+
+  const note = document.createElement('div');
+  note.className = 'filter-note';
+  note.textContent = '※ 長押しで並べ替え（同じ日付の中）／✕ で削除';
+  viewHist.appendChild(note);
+}
+
+function delHistory(entry){
+  if(!confirm('履歴から「'+entry.name+'」を削除しますか？')) return;
+  db.history = db.history.filter(h=>h.id!==entry.id);
+  // リスト側の「買った」チェックとずれないように戻す
+  if(entry.date === today()){
+    const it = db.items.find(i=>i.id===entry.itemId);
+    if(it && it.bought) it.bought = false;
+  }
+  save(); renderHist(); renderList();
+}
+
+/* =========================================================
+   タブ
+   ========================================================= */
+document.querySelectorAll('.tab').forEach(t=>{
+  t.onclick = () => {
+    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    t.classList.add('active');
+    const list = t.dataset.tab === 'list';
+    viewList.style.display = list ? '' : 'none';
+    viewHist.style.display = list ? 'none' : '';
+    document.getElementById('fab').style.display = list ? '' : 'none';
+    if(list) renderList(); else renderHist();
+  };
+});
+const onHistTab = () => document.querySelector('.tab[data-tab="hist"]').classList.contains('active');
+
+/* =========================================================
+   アイテム登録／編集
+   ========================================================= */
+const itemMask = document.getElementById('itemMask');
+let editing = null, pickedTag = null;
+
+document.getElementById('fab').onclick = () => openItem(null);
+
+function openItem(item){
+  editing = item;
+  pickedTag = item ? item.tagId : (db.tags[0] && db.tags[0].id);
+  document.getElementById('itemTitle').textContent = item ? 'アイテムを編集' : 'アイテムを登録';
+  document.getElementById('itemName').value = item ? item.name : '';
+  document.getElementById('itemDelWrap').style.display = item ? '' : 'none';
+  renderTagChips();
+  itemMask.classList.remove('hidden');
+  if(!item) setTimeout(()=>document.getElementById('itemName').focus(), 80);
+}
+function renderTagChips(){
+  const box = document.getElementById('itemTags');
+  box.innerHTML = '';
+  if(pickedTag && !tagOf(pickedTag)) pickedTag = db.tags[0] ? db.tags[0].id : null;
+  db.tags.forEach(t=>{
+    const c = document.createElement('div');
+    c.className = 'chip' + (t.id===pickedTag?' sel':'');
+    c.textContent = t.name || '（無名）';
+    c.style.background = t.color; c.style.color = readable(t.color);
+    c.onclick = () => { pickedTag = t.id; renderTagChips(); };
+    box.appendChild(c);
+  });
+  const e = document.createElement('button');
+  e.className = 'chip edit';
+  e.textContent = '＋ タグを編集';
+  e.onclick = openTags;
+  box.appendChild(e);
+}
+document.getElementById('itemCancel').onclick = () => itemMask.classList.add('hidden');
+itemMask.onclick = e => { if(e.target===itemMask) itemMask.classList.add('hidden'); };
+
+document.getElementById('itemSave').onclick = () => {
+  const n = document.getElementById('itemName').value.trim();
+  if(!n){ alert('アイテム名を入力してください。'); return; }
+  if(editing){
+    // 履歴は購入した時点の記録として残すので、ここでは書き換えない
+    editing.name = n; editing.tagId = pickedTag;
+  }else{
+    db.items.push({id:uid(), name:n, tagId:pickedTag, plannedOrder:null, bought:false});
+  }
+  save(); itemMask.classList.add('hidden'); renderList();
+};
+document.getElementById('itemDel').onclick = () => {
+  if(!confirm('「'+editing.name+'」を削除します。（履歴は残ります）')) return;
+  db.items = db.items.filter(i=>i.id!==editing.id);
+  save(); itemMask.classList.add('hidden'); renderList();
+};
+
+/* =========================================================
+   タグ管理（アイテム登録画面からも開ける）
+   ========================================================= */
+const tagMask = document.getElementById('tagMask');
+document.getElementById('btnTags').onclick = openTags;
+
+function openTags(){ renderTagEditor(); tagMask.classList.remove('hidden'); }
+
+document.getElementById('tagClose').onclick = () => {
+  db.tags = db.tags.filter(t => t.name.trim() !== '');   // 未入力のタグは破棄
+  db.items.forEach(i=>{ if(i.tagId && !tagOf(i.tagId)) i.tagId = null; });
+  save();
+  tagMask.classList.add('hidden');
+  if(!itemMask.classList.contains('hidden')) renderTagChips();
+  if(onHistTab()) renderHist(); else renderList();
+};
+
+document.getElementById('tagAdd').onclick = () => {
+  db.tags.push({id:uid(), name:'', color:pastel()});
+  save(); renderTagEditor(true);
+};
+/* 追加時の初期色はパステルからランダムに */
+function pastel(){
+  const h = Math.floor(Math.random()*360);
+  return hsl2hex(h, 45, 84);
+}
+/* --- カラーピッカー（色あい・鮮やかさ・明るさの3本のスライダー） --- */
+function colorPicker(tag, swatch){
+  const box = document.createElement('div');
+  box.className = 'picker';
+  const [h0,s0,l0] = hex2hsl(tag.color);
+  const st = {h:h0, s:s0, l:l0};
+
+  const slider = (key, label, max) => {
+    const wrap = document.createElement('div');
+    wrap.className = 'sl';
+    const lab = document.createElement('span');
+    lab.textContent = label;
+    const r = document.createElement('input');
+    r.type = 'range'; r.min = 0; r.max = max; r.value = st[key];
+    r.oninput = () => {
+      st[key] = +r.value;
+      tag.color = hsl2hex(st.h, st.s, st.l);
+      swatch.style.background = tag.color;
+      paint();
+      save();
+    };
+    wrap.appendChild(lab); wrap.appendChild(r);
+    box.appendChild(wrap);
+    return r;
+  };
+  const rh = slider('h','色あい',360);
+  const rs = slider('s','鮮やか',100);
+  const rl = slider('l','明るさ',100);
+
+  function paint(){
+    const stops = [];
+    for(let d=0; d<=360; d+=30) stops.push('hsl('+d+','+st.s+'%,'+st.l+'%)');
+    rh.style.background = 'linear-gradient(90deg,'+stops.join(',')+')';
+    rs.style.background = 'linear-gradient(90deg,hsl('+st.h+',0%,'+st.l+'%),hsl('+st.h+',100%,'+st.l+'%))';
+    rl.style.background = 'linear-gradient(90deg,#000,hsl('+st.h+','+st.s+'%,50%),#fff)';
+  }
+  paint();
+  return box;
+}
+
+function hex2hsl(hex){
+  const c = (hex||'#cccccc').replace('#','');
+  const n = c.length===3 ? c.split('').map(x=>x+x).join('') : c;
+  let r=parseInt(n.slice(0,2),16)/255, g=parseInt(n.slice(2,4),16)/255, b=parseInt(n.slice(4,6),16)/255;
+  const mx=Math.max(r,g,b), mn=Math.min(r,g,b), d=mx-mn;
+  let h=0;
+  if(d){
+    if(mx===r)      h = 60*(((g-b)/d)%6);
+    else if(mx===g) h = 60*((b-r)/d + 2);
+    else            h = 60*((r-g)/d + 4);
+  }
+  if(h<0) h += 360;
+  const l = (mx+mn)/2;
+  const s = d ? d/(1-Math.abs(2*l-1)) : 0;
+  return [Math.round(h), Math.round(s*100), Math.round(l*100)];
+}
+
+function hsl2hex(h,s,l){
+  s/=100; l/=100;
+  const k = n => (n + h/30) % 12;
+  const a = s * Math.min(l, 1-l);
+  const f = n => Math.round(255 * (l - a * Math.max(-1, Math.min(k(n)-3, Math.min(9-k(n), 1)))));
+  return '#' + [f(0),f(8),f(4)].map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+
+function renderTagEditor(focusLast){
+  const box = document.getElementById('tagList');
+  box.innerHTML = '';
+  const g = group('tags');
+  db.tags.forEach(t=>{
+    const r = document.createElement('div');
+    r.className = 'tagrow'; r.dataset.id = t.id;
+
+    const grip = document.createElement('span');
+    grip.className='grip'; grip.textContent='⋮⋮';
+
+    const col = document.createElement('button');
+    col.className = 'swatch';
+    col.style.background = t.color;
+    col.onclick = () => r.classList.toggle('open');
+
+    const nm = document.createElement('input');
+    nm.type='text'; nm.value = t.name;
+    nm.placeholder = '新しいタグ';
+    nm.oninput = () => { t.name = nm.value; save(); };
+
+    const del = document.createElement('button');
+    del.className='icon-btn'; del.textContent='✕';
+    del.onclick = () => {
+      const used = db.items.filter(i=>i.tagId===t.id).length;
+      if(used && !confirm('このタグを使っているアイテムが '+used+' 件あります。削除しますか？\n（アイテムのタグは未設定になります）')) return;
+      db.items.forEach(i=>{ if(i.tagId===t.id) i.tagId = null; });
+      db.tags = db.tags.filter(x=>x.id!==t.id);
+      save(); renderTagEditor();
+    };
+
+    r.appendChild(grip); r.appendChild(col); r.appendChild(nm); r.appendChild(del);
+    r.appendChild(colorPicker(t, col));
+    attachDrag(r);
+    g.appendChild(r);
+  });
+  box.appendChild(g);
+
+  if(focusLast){
+    const inputs = box.querySelectorAll('input[type=text]');
+    const last = inputs[inputs.length-1];
+    if(last){ last.focus(); last.scrollIntoView({block:'nearest'}); }
+  }
+}
+
+/* =========================================================
+   長押しドラッグ並べ替え（同じグループ内のみ）
+   ========================================================= */
+let drag = null;
+
+function attachDrag(el){
+  el.addEventListener('pointerdown', e => {
+    if(e.target.closest('button, input')) return;
+    const timer = setTimeout(() => startDrag(el), 420);
+    const cancel = () => {
+      clearTimeout(timer);
+      el.removeEventListener('pointerup', cancel);
+      el.removeEventListener('pointercancel', cancel);
+      el.removeEventListener('pointermove', moveCancel);
+    };
+    const moveCancel = ev => { if(Math.abs(ev.clientY - e.clientY) > 8) cancel(); };
+    el.addEventListener('pointerup', cancel);
+    el.addEventListener('pointercancel', cancel);
+    el.addEventListener('pointermove', moveCancel);
+  });
+}
+
+function startDrag(el){
+  drag = { el, group: el.parentElement };
+  el.classList.add('drag-active');
+  document.body.classList.add('dragging');
+  if(navigator.vibrate) navigator.vibrate(12);
+  document.addEventListener('pointermove', onDragMove, {passive:false});
+  document.addEventListener('pointerup', endDrag);
+  document.addEventListener('pointercancel', endDrag);
+}
+
+function onDragMove(e){
+  if(!drag) return;
+  e.preventDefault();
+  const y = e.clientY;
+  const sibs = [...drag.group.children].filter(c => c !== drag.el);
+  for(const s of sibs){
+    const r = s.getBoundingClientRect();
+    const mid = r.top + r.height/2;
+    if(y < mid && s.compareDocumentPosition(drag.el) & Node.DOCUMENT_POSITION_FOLLOWING){
+      drag.group.insertBefore(drag.el, s); break;
+    }
+    if(y > mid && s.compareDocumentPosition(drag.el) & Node.DOCUMENT_POSITION_PRECEDING){
+      drag.group.insertBefore(drag.el, s.nextSibling); break;
+    }
+  }
+}
+
+function endDrag(){
+  if(!drag) return;
+  drag.el.classList.remove('drag-active');
+  document.body.classList.remove('dragging');
+  document.removeEventListener('pointermove', onDragMove);
+  document.removeEventListener('pointerup', endDrag);
+  document.removeEventListener('pointercancel', endDrag);
+  commitOrder(drag.group);
+  drag = null;
+}
+
+function commitOrder(g){
+  const ids = [...g.children].map(c=>c.dataset.id);
+  const kind = g.dataset.group;
+
+  if(kind === 'tags'){
+    db.tags.sort((a,b)=>ids.indexOf(a.id)-ids.indexOf(b.id));
+    save(); renderTagEditor(); return;
+  }
+  if(kind.startsWith('hist:')){
+    ids.forEach((id,n)=>{ const h = db.history.find(x=>x.id===id); if(h) h.order = n; });
+    save(); renderHist(); return;
+  }
+  if(kind === 'planned'){
+    ids.forEach((id,n)=>{ const i = db.items.find(x=>x.id===id); if(i) i.plannedOrder = n; });
+  }else{
+    // 登録リスト：登録順そのものを入れ替える
+    const rest = db.items.filter(i=>i.plannedOrder==null);
+    rest.sort((a,b)=>ids.indexOf(a.id)-ids.indexOf(b.id));
+    let k = 0;
+    db.items = db.items.map(i => i.plannedOrder==null ? rest[k++] : i);
+  }
+  save(); renderList();
+}
+
+/* 起動 */
+renderList();
+
+/* PWA：オフラインで使えるようにする（file:// で開いたときは何もしない） */
+if("serviceWorker" in navigator && location.protocol.startsWith("http")){
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(()=>{}));
+}
+</script>
+</body>
+</html>
