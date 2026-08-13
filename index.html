@@ -253,18 +253,19 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
 /* =========================================================
    10. タグ／カテゴリの編集行（共通）
    ========================================================= */
+/* タグ・カテゴリとも、アイテムリストに近い行間でそろえる */
 .erow{
   display:flex;align-items:center;flex-wrap:wrap;gap:6px;
-  padding:11px 2px;background:var(--card);
+  padding:2px 2px;background:var(--card);
 }
 .erow > .grip{                       /* 行全体が掴めるので位置の目印だけ */
   width:22px;min-height:34px;display:flex;align-items:center;justify-content:center;
-  margin:-11px 0;font-size:14px;
+  font-size:14px;
 }
 /* 名前は通常テキスト表示。ダブルタップで入力欄に変わる
    （常時入力欄だと行の長押しがフォーカスに取られてドラッグできない） */
 .ename{
-  flex:1;min-width:0;padding:9px 11px;font-size:15px;line-height:1.5;
+  flex:1;min-width:0;padding:6px 10px;font-size:15px;line-height:1.5;
   border-radius:8px;background:#fbfaf8;color:var(--text);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
@@ -274,12 +275,6 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
   display:block;width:100%;padding:0;border:0;background:none;
   font-size:15px;line-height:1.6;height:auto;border-radius:0;
 }
-/* カテゴリは数が増えるので、アイテムリストに近い行間まで詰める
-   （タグ編集はゆったりしたままにする） */
-#catList .erow{padding:2px 2px;}
-#catList .erow > .grip{margin:0;}
-#catList .ename{padding:6px 10px;}
-
 .icon-btn{background:none;border:0;color:var(--faint);font-size:15px;padding:4px 6px;}
 .catcount{
   background:none;border:0;font-size:11.5px;font-weight:700;color:var(--muted);
