@@ -48,10 +48,13 @@ body{
 .tab,.row,.erow,.cathead,.pickrow,.grip,.sec-label,.chip,.fchip{
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
 }
-.erow,.cathead,.pickrow{touch-action:manipulation;}
+.row,.erow,.cathead,.pickrow{touch-action:manipulation;}  /* ダブルタップ拡大と遅延クリックを止める */
 .grip{touch-action:none;}
-/* 並べ替え中は下地をスクロールさせない */
+/* 並べ替え中／シートを開いている間は、下地をスクロールさせない */
 body.dragging,body.dragging .sheet{overflow:hidden;}
+/* iOS では body の overflow:hidden だけでは背後のスクロールが止まらないので、
+   位置を固定して逃がさない（top は開いたときのスクロール量をJSで入れる） */
+body.locked{position:fixed;left:0;right:0;width:100%;overflow:hidden;}
 
 /* 掴んでいる要素の共通の見え方 */
 .drag-active{
@@ -201,13 +204,16 @@ main{padding:10px 12px 96px;max-width:640px;margin:0 auto;}
 .mask{
   position:fixed;inset:0;background:rgba(90,86,78,.35);z-index:40;
   display:flex;align-items:flex-end;justify-content:center;
+  overscroll-behavior:contain;
 }
 #tagMask,#catMask{z-index:50;}          /* アイテム画面の上に重ねる */
 .mask.hidden{display:none;}
 .sheet{
   background:var(--card);width:100%;max-width:640px;
   border-radius:18px 18px 0 0;padding:18px 18px calc(18px + env(safe-area-inset-bottom));
-  max-height:86vh;overflow:auto;animation:up .2s ease;
+  max-height:86vh;overflow-y:auto;animation:up .2s ease;
+  /* 端まで来てもスクロールを背後のリストへ渡さない */
+  overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
 }
 @keyframes up{from{transform:translateY(24px);opacity:.4}to{transform:none;opacity:1}}
 .sheet h2{font-size:15px;margin:0 0 14px;}
@@ -268,6 +274,12 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
   display:block;width:100%;padding:0;border:0;background:none;
   font-size:15px;line-height:1.6;height:auto;border-radius:0;
 }
+/* カテゴリは数が増えるので、アイテムリストに近い行間まで詰める
+   （タグ編集はゆったりしたままにする） */
+#catList .erow{padding:2px 2px;}
+#catList .erow > .grip{margin:0;}
+#catList .ename{padding:6px 10px;}
+
 .icon-btn{background:none;border:0;color:var(--faint);font-size:15px;padding:4px 6px;}
 .catcount{
   background:none;border:0;font-size:11.5px;font-weight:700;color:var(--muted);
@@ -302,7 +314,10 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
    11. カテゴリのアイテム選択
    ========================================================= */
 /* スクロールバーとチェックが重ならないよう、右に余白を取る */
-.picklist{max-height:52vh;overflow:auto;-webkit-overflow-scrolling:touch;padding-right:10px;}
+.picklist{
+  max-height:52vh;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-right:10px;
+  overscroll-behavior:contain;
+}
 .pickrow{
   display:flex;align-items:center;gap:9px;padding:9px 2px;
   border-bottom:1px solid var(--line);
@@ -479,9 +494,39 @@ function readable(hex){
   return (r*299 + g*587 + b*114)/1000 > 168 ? '#5b564e' : '#ffffff';
 }
 
-const openSheet  = m => m.classList.remove('hidden');
-const closeSheet = m => m.classList.add('hidden');
-const isOpen     = m => !m.classList.contains('hidden');
+const isOpen = m => !m.classList.contains('hidden');
+
+/* シートを開いている間は背後のリストを固定する。
+   これが無いと、シートの端まで来たスクロールが背後へ流れてしまう。
+   位置を固定するとページ先頭に戻ってしまうので、スクロール量を覚えて元に戻す。 */
+let lockedY = 0;
+function lockPage(){
+  if(document.body.classList.contains('locked')) return;
+  lockedY = window.scrollY;
+  document.body.style.top = -lockedY + 'px';
+  document.body.classList.add('locked');
+}
+function unlockPage(){
+  if(!document.body.classList.contains('locked')) return;
+  document.body.classList.remove('locked');
+  document.body.style.top = '';
+  window.scrollTo(0, lockedY);
+}
+function openSheet(m){
+  m.classList.remove('hidden');
+  lockPage();
+}
+function closeSheet(m){
+  m.classList.add('hidden');
+  if(!document.querySelector('.mask:not(.hidden)')) unlockPage();
+}
+
+/* 背景（シートの外側）を指でなぞっても何も動かないようにする */
+document.querySelectorAll('.mask').forEach(m => {
+  m.addEventListener('touchmove', e => {
+    if(!e.target.closest('.sheet')) e.preventDefault();
+  }, {passive:false});
+});
 
 const onHistTab = () => $('viewHist').hidden === false;
 const refresh   = () => onHistTab() ? renderHist() : renderList();
@@ -500,6 +545,17 @@ function sortable(commit, cls){
 
 let drag = null;
 const blockEvent = e => { if(drag) e.preventDefault(); };
+
+/* ドラッグを離した直後は click が続けて飛んでくる。
+   そのまま通すとアイテムの編集画面が開いたりカテゴリが畳まれたりするので、
+   1回だけ握りつぶす（クリックが来ないまま終わる場合に備えて時間でも解除）。 */
+let swallowClick = false;
+document.addEventListener('click', e => {
+  if(!swallowClick) return;
+  swallowClick = false;
+  e.stopPropagation();
+  e.preventDefault();
+}, true);
 
 /* handle = 掴む場所、moving = 実際に動かす要素（省略時は handle 自身） */
 function attachDrag(handle, moving){
@@ -558,6 +614,10 @@ function endDrag(){
   document.removeEventListener('pointercancel', endDrag);
   const box = drag.box;
   drag = null;
+  // 続けて飛んでくる click は指を離した直後に来る。
+  // 長く構えると次の本当のタップまで飲み込んでしまうので、ごく短い間だけ。
+  swallowClick = true;
+  setTimeout(() => { swallowClick = false; }, 150);
   box._commit([...box.children].map(c => c.dataset.id));
   save();
 }
@@ -595,28 +655,33 @@ function renderList(){
 }
 
 function section(kind, title, items){
-  const {shown, filtering} = tagFilter(kind, items);
-  drawSectionHead(kind, title, items, shown, filtering);
+  const f = tagFilter(kind, items);
+  drawSectionHead(kind, title, items.length, f);
 
-  if(!shown.length){
+  if(!f.shown.length){
     viewList.appendChild(el('div', 'note', '該当するアイテムはありません。'));
     return;
   }
   if(kind === 'rest' && db.categories.length){
-    drawCategories(shown, filtering);
+    drawCategories(f.shown, f.filtering);
   }else{
-    const box = sortable(ids => {
-      if(kind === 'planned') ids.forEach((id,n) => { const i = db.items.find(x => x.id === id); if(i) i.plannedOrder = n; });
-      else                   reorderItems(i => i.plannedOrder == null, ids);
-      renderList();
-    }, filtering ? 'filtered' : '');
-    shown.forEach(i => box.appendChild(itemRow(i, !filtering)));
-    viewList.appendChild(box);
+    const commit = kind === 'planned'
+      ? ids => ids.forEach((id,n) => { const i = db.items.find(x => x.id === id); if(i) i.plannedOrder = n; })
+      : ids => reorderItems(i => i.plannedOrder == null, ids);
+    viewList.appendChild(itemBox(f.shown, f.filtering, commit));
   }
-  if(filtering) viewList.appendChild(el('div', 'note', '※ 絞り込み中は並べ替えできません'));
+  if(f.filtering) viewList.appendChild(el('div', 'note', '※ 絞り込み中は並べ替えできません'));
 }
 
-/* 絞り込み状態を整えて、表示すべきアイテムを返す */
+/* アイテムの行をまとめた並べ替え可能な箱 */
+function itemBox(items, filtering, commit, cls){
+  const box = sortable(ids => { commit(ids); renderList(); },
+                       (cls || '') + (filtering ? ' filtered' : ''));
+  items.forEach(i => box.appendChild(itemRow(i, !filtering)));
+  return box;
+}
+
+/* 絞り込み状態を整えて、描画に必要なものを一式返す */
 function tagFilter(kind, items){
   const sel = ui[kind].sel;
   const used = db.tags.filter(t => items.some(i => i.tagId === t.id));
@@ -625,24 +690,22 @@ function tagFilter(kind, items){
   [...sel].forEach(id => {
     if(id === '__none' ? !noTag : !used.some(t => t.id === id)) sel.delete(id);
   });
-  ui[kind].used = used;
-  ui[kind].noTag = noTag;
   return {
+    sel, used, noTag,
     shown: sel.size ? items.filter(i => sel.has(tagOf(i.tagId) ? i.tagId : '__none')) : items,
     filtering: sel.size > 0
   };
 }
 
-function drawSectionHead(kind, title, items, shown, filtering){
-  const {sel, used, noTag} = ui[kind];
+function drawSectionHead(kind, title, total, f){
   const head = el('div', 'sec-head');
   head.appendChild(el('div', 'sec-label',
-    title + '（' + shown.length + (filtering ? ' / ' + items.length : '') + '）'));
+    title + '（' + f.shown.length + (f.filtering ? ' / ' + total : '') + '）'));
 
-  const hasChoice = used.length + (noTag ? 1 : 0) > 1;
-  const barOpen = ui[kind].open || filtering;
+  const hasChoice = f.used.length + (f.noTag ? 1 : 0) > 1;
+  const barOpen = ui[kind].open || f.filtering;
   if(hasChoice){
-    const b = el('button', 'filter-btn' + (filtering ? ' on' : ''),
+    const b = el('button', 'filter-btn' + (f.filtering ? ' on' : ''),
       (barOpen ? '▲' : '▼') + ' 絞り込み');
     b.onclick = () => { ui[kind].open = !ui[kind].open; renderList(); };
     head.appendChild(b);
@@ -651,19 +714,19 @@ function drawSectionHead(kind, title, items, shown, filtering){
   if(!hasChoice || !barOpen) return;
 
   const bar = el('div', 'fbar');
-  const all = el('button', 'fchip all' + (filtering ? '' : ' on'), 'すべて');
-  all.onclick = () => { sel.clear(); renderList(); };
+  const all = el('button', 'fchip all' + (f.filtering ? '' : ' on'), 'すべて');
+  all.onclick = () => { f.sel.clear(); renderList(); };
   bar.appendChild(all);
 
   const chip = (id, name, color) => {
-    const on = sel.has(id);
+    const on = f.sel.has(id);
     const c = el('button', 'fchip' + (on ? ' on' : ''), name);
     if(on){ c.style.background = color; c.style.color = readable(color); }
-    c.onclick = () => { on ? sel.delete(id) : sel.add(id); renderList(); };
+    c.onclick = () => { on ? f.sel.delete(id) : f.sel.add(id); renderList(); };
     bar.appendChild(c);
   };
-  used.forEach(t => chip(t.id, t.name, t.color));
-  if(noTag) chip('__none', 'タグなし', '#d6d2ca');
+  f.used.forEach(t => chip(t.id, t.name, t.color));
+  if(f.noTag) chip('__none', 'タグなし', '#d6d2ca');
   viewList.appendChild(bar);
 }
 
@@ -692,12 +755,8 @@ function drawCategories(shown, filtering){
     block.appendChild(head);
 
     if(open && mine.length){
-      const box = sortable(ids => {
-        reorderItems(i => i.plannedOrder == null && i.catId === cat.id, ids);
-        renderList();
-      }, filtering ? 'filtered' : '');
-      mine.forEach(i => box.appendChild(itemRow(i, !filtering)));
-      block.appendChild(box);
+      block.appendChild(itemBox(mine, filtering,
+        ids => reorderItems(i => i.plannedOrder == null && i.catId === cat.id, ids)));
     }
     if(!filtering) attachDrag(head, block);     // 見出しを長押しでカテゴリごと移動
     wrap.appendChild(block);
@@ -707,12 +766,8 @@ function drawCategories(shown, filtering){
   // どのカテゴリにも入れていないアイテム
   const loose = shown.filter(i => !catOf(i.catId));
   if(!loose.length) return;
-  const box = sortable(ids => {
-    reorderItems(i => i.plannedOrder == null && !catOf(i.catId), ids);
-    renderList();
-  }, 'loose' + (filtering ? ' filtered' : ''));
-  loose.forEach(i => box.appendChild(itemRow(i, !filtering)));
-  viewList.appendChild(box);
+  viewList.appendChild(itemBox(loose, filtering,
+    ids => reorderItems(i => i.plannedOrder == null && !catOf(i.catId), ids), 'loose'));
 }
 
 function tagChip(t){
@@ -998,32 +1053,44 @@ $('tagAdd').onclick = () => {
   save(); renderTagEditor(true);
 };
 
-function renderTagEditor(withEdit){
-  const box = $('tagList');
-  box.innerHTML = '';
-  const list = sortable(ids => { sortByIds(db.tags, ids); renderTagEditor(); });
-
-  db.tags.forEach(t => {
-    const row = el('div', 'erow');
-    row.dataset.id = t.id;
-    row.appendChild(el('span', 'grip', '⋮⋮'));
-
+const TAG_EDITOR = {
+  boxId:'tagList', list:'tags', ref:'tagId', placeholder:'新しいタグ',
+  delMessage: n => 'このタグを使っているアイテムが ' + n + ' 件あります。削除しますか？\n（アイテムのタグは未設定になります）',
+  lead: (t, row) => {
     const swatch = el('button', 'swatch');
     swatch.style.background = t.color;
     swatch.onclick = () => row.classList.toggle('open');
-    row.appendChild(swatch);
+    row._swatch = swatch;
+    return swatch;
+  },
+  extra: (t, row) => colorPicker(t, row._swatch)
+};
+const renderTagEditor = withEdit => renderEditor(TAG_EDITOR, withEdit);
 
-    row.appendChild(nameCell(t, '新しいタグ', () => renderTagEditor()));
+/* タグとカテゴリは作りが同じなので、違うところだけ設定で受け取る。
+   行の並びは：⋮⋮ / lead / 名前 / trail / ✕ / extra */
+function renderEditor(cfg, withEdit){
+  const box = $(cfg.boxId);
+  const again = () => renderEditor(cfg);
+  box.innerHTML = '';
+  const list = sortable(ids => { sortByIds(db[cfg.list], ids); again(); });
+
+  db[cfg.list].forEach(obj => {
+    const row = el('div', 'erow');
+    row.dataset.id = obj.id;
+    row.appendChild(el('span', 'grip', '⋮⋮'));
+    if(cfg.lead)  row.appendChild(cfg.lead(obj, row));
+    row.appendChild(nameCell(obj, cfg.placeholder, again));
+    if(cfg.trail) row.appendChild(cfg.trail(obj, row));
     row.appendChild(deleteBtn(
-      () => db.items.filter(i => i.tagId === t.id).length,
-      n => 'このタグを使っているアイテムが ' + n + ' 件あります。削除しますか？\n（アイテムのタグは未設定になります）',
+      () => db.items.filter(i => i[cfg.ref] === obj.id).length,
+      cfg.delMessage,
       () => {
-        db.items.forEach(i => { if(i.tagId === t.id) i.tagId = null; });
-        db.tags = db.tags.filter(x => x.id !== t.id);
-        renderTagEditor();
+        db.items.forEach(i => { if(i[cfg.ref] === obj.id) i[cfg.ref] = null; });
+        db[cfg.list] = db[cfg.list].filter(x => x.id !== obj.id);
+        again();
       }));
-    row.appendChild(colorPicker(t, swatch));
-
+    if(cfg.extra) row.appendChild(cfg.extra(obj, row));
     attachDrag(row);
     list.appendChild(row);
   });
@@ -1129,6 +1196,17 @@ $('catAdd').onclick = () => {
 $('catBack').onclick = () => renderCatEditor();
 
 /* ---- 第1階層：カテゴリの一覧 ---- */
+const CAT_EDITOR = {
+  boxId:'catList', list:'categories', ref:'catId', placeholder:'新しいカテゴリ',
+  delMessage: n => 'このカテゴリに入っているアイテムが ' + n + ' 件あります。削除しますか？\n（アイテムは残り、カテゴリなしに戻ります）',
+  trail: cat => {
+    const b = el('button', 'catcount',
+      db.items.filter(i => i.catId === cat.id).length + '件 ›');
+    b.onclick = () => renderCatPicker(cat.id);
+    return b;
+  }
+};
+
 function renderCatEditor(withEdit){
   pickCat = null;
   picked.clear();
@@ -1139,36 +1217,7 @@ function renderCatEditor(withEdit){
     '名前は<b>ダブルタップ</b>で編集、行を<b>長押ししてドラッグ</b>で並べ替え。<br>' +
     '右の<b>「◯件 ›」</b>から、アイテムをまとめて追加・カテゴリから外せます。<br>' +
     '名前が空のカテゴリは閉じるときに削除されます。';
-
-  const box = $('catList');
-  box.innerHTML = '';
-  const list = sortable(ids => { sortByIds(db.categories, ids); renderCatEditor(); });
-
-  db.categories.forEach(cat => {
-    const row = el('div', 'erow');
-    row.dataset.id = cat.id;
-    row.appendChild(el('span', 'grip', '⋮⋮'));
-    row.appendChild(nameCell(cat, '新しいカテゴリ', () => renderCatEditor()));
-
-    const count = el('button', 'catcount',
-      db.items.filter(i => i.catId === cat.id).length + '件 ›');
-    count.onclick = () => renderCatPicker(cat.id);
-    row.appendChild(count);
-
-    row.appendChild(deleteBtn(
-      () => db.items.filter(i => i.catId === cat.id).length,
-      n => 'このカテゴリに入っているアイテムが ' + n + ' 件あります。削除しますか？\n（アイテムは残り、カテゴリなしに戻ります）',
-      () => {
-        db.items.forEach(i => { if(i.catId === cat.id) i.catId = null; });
-        db.categories = db.categories.filter(x => x.id !== cat.id);
-        renderCatEditor();
-      }));
-
-    attachDrag(row);
-    list.appendChild(row);
-  });
-  box.appendChild(list);
-  if(withEdit) editLast(box);
+  renderEditor(CAT_EDITOR, withEdit);
 }
 
 /* ---- 第2階層：このカテゴリに入れるアイテムを選ぶ ---- */
@@ -1257,7 +1306,11 @@ $('catRemove').onclick = () => {
 function afterPick(){
   save();
   picked.clear();
+  const top = document.querySelector('.picklist');   // 見ていた位置を保つ
+  const y = top ? top.scrollTop : 0;
   drawPickList();
+  const again = document.querySelector('.picklist');
+  if(again) again.scrollTop = y;
   if(isOpen(itemMask)) drawCatChips();
 }
 
