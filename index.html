@@ -186,6 +186,30 @@ main{padding:10px 12px 96px;max-width:640px;margin:0 auto;}
 }
 .mask#tagMask,.mask#catMask{z-index:50;}
 .group[data-group="catedit"]{background:none;box-shadow:none;overflow:visible;border-radius:0;}
+
+/* カテゴリのアイテム選択画面 */
+.catcount{
+  background:none;border:0;font-size:11.5px;font-weight:700;color:var(--muted);
+  font-family:inherit;padding:8px 4px;flex:none;white-space:nowrap;
+}
+.pickrow{
+  display:flex;align-items:center;gap:9px;padding:8px 2px;
+  border-bottom:1px solid var(--line);
+  -webkit-user-select:none;user-select:none;touch-action:manipulation;
+}
+.pickrow:last-child{border-bottom:0;}
+.pickrow .pname{
+  flex:1;min-width:0;font-size:14px;color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.pickrow .owner{
+  font-size:10.5px;font-weight:700;flex:none;max-width:40%;
+  padding:2px 8px;border-radius:999px;background:#f2efe9;color:var(--muted);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.pickrow .owner.mine{background:var(--accent-soft);color:#b5644a;}
+#catBtnsPick .btn{font-size:13px;padding:12px 4px;}
+.picklist{max-height:52vh;overflow:auto;-webkit-overflow-scrolling:touch;}
 .mask.hidden{display:none;}
 .sheet{
   background:var(--card);width:100%;max-width:640px;
@@ -286,6 +310,7 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
   <div class="hd-row">
     <div class="hd-title">お買い物リスト</div>
     <button class="hd-btn" id="btnTags">タグ</button>
+    <button class="hd-btn" id="btnCats">カテゴリ</button>
     <button class="hd-btn" id="btnReset">リセット</button>
   </div>
   <div class="tabs">
@@ -345,15 +370,18 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
 <!-- カテゴリ管理 -->
 <div class="mask hidden" id="catMask">
   <div class="sheet">
-    <h2>カテゴリの編集</h2>
+    <h2 id="catTitle">カテゴリの編集</h2>
     <div id="catList"></div>
-    <div class="btns">
+    <div class="btns" id="catBtnsList">
       <button class="btn ghost" id="catAdd">＋ カテゴリを追加</button>
       <button class="btn primary" id="catClose">完了</button>
     </div>
-    <p class="hint">名前は<b>ダブルタップ</b>で編集、行を<b>長押ししてドラッグ</b>で並べ替え。<br>
-      アイテムをどのカテゴリに入れるかは、アイテムの編集画面で選びます。<br>
-      名前が空のカテゴリは閉じるときに削除されます。</p>
+    <div class="btns" id="catBtnsPick" style="display:none">
+      <button class="btn ghost" id="catBack">← 戻る</button>
+      <button class="btn ghost" id="catRemove">外す</button>
+      <button class="btn primary" id="catAddItems">追加</button>
+    </div>
+    <p class="hint" id="catHint"></p>
   </div>
 </div>
 
@@ -991,7 +1019,14 @@ function editLastCell(box){
    カテゴリ管理
    ========================================================= */
 const catMask = document.getElementById('catMask');
-function openCats(){ renderCatEditor(); catMask.classList.remove('hidden'); }
+let pickCat = null;                 // アイテム選択画面で開いているカテゴリ
+const picked = new Set();           // 選択中のアイテムid
+
+document.getElementById('btnCats').onclick = openCats;
+function openCats(){
+  pickCat = null; renderCatEditor();
+  catMask.classList.remove('hidden');
+}
 
 document.getElementById('catClose').onclick = () => {
   db.categories = db.categories.filter(c => c.name.trim() !== '');  // 未入力は破棄
@@ -1007,7 +1042,22 @@ document.getElementById('catAdd').onclick = () => {
   save(); renderCatEditor(true);
 };
 
+/* 画面の出し分け（一覧 ⇔ アイテム選択） */
+function catViewMode(pick){
+  document.getElementById('catBtnsList').style.display = pick ? 'none' : '';
+  document.getElementById('catBtnsPick').style.display = pick ? '' : 'none';
+}
+
+/* ---------- 第1階層：カテゴリの一覧 ---------- */
 function renderCatEditor(editLast){
+  pickCat = null;
+  catViewMode(false);
+  document.getElementById('catTitle').textContent = 'カテゴリの編集';
+  document.getElementById('catHint').innerHTML =
+    '名前は<b>ダブルタップ</b>で編集、行を<b>長押ししてドラッグ</b>で並べ替え。<br>' +
+    '右の<b>「◯件 ›」</b>から、アイテムをまとめて追加・カテゴリから外せます。<br>' +
+    '名前が空のカテゴリは閉じるときに削除されます。';
+
   const box = document.getElementById('catList');
   box.innerHTML = '';
   const g = group('catedit');
@@ -1020,6 +1070,11 @@ function renderCatEditor(editLast){
 
     const nm = nameCell(c, '新しいカテゴリ', () => renderCatEditor());
 
+    const cnt = document.createElement('button');
+    cnt.className = 'catcount';
+    cnt.textContent = db.items.filter(i=>i.catId===c.id).length + '件 ›';
+    cnt.onclick = () => renderCatPicker(c.id);
+
     const del = document.createElement('button');
     del.className='icon-btn'; del.textContent='✕';
     del.onclick = () => {
@@ -1030,13 +1085,109 @@ function renderCatEditor(editLast){
       save(); renderCatEditor();
     };
 
-    r.appendChild(grip); r.appendChild(nm); r.appendChild(del);
+    r.appendChild(grip); r.appendChild(nm); r.appendChild(cnt); r.appendChild(del);
     attachDrag(r);
     g.appendChild(r);
   });
   box.appendChild(g);
   if(editLast) editLastCell(box);
 }
+
+/* ---------- 第2階層：このカテゴリに入れるアイテムを選ぶ ---------- */
+function renderCatPicker(catId){
+  pickCat = catId;
+  picked.clear();
+  catViewMode(true);
+  const cat = catOf(catId);
+  document.getElementById('catTitle').textContent =
+    '「' + (cat.name || '（無名）') + '」のアイテム';
+  document.getElementById('catHint').textContent =
+    'アイテムを選んでから「追加」または「外す」を押します。他のカテゴリに入っているものを追加するときは確認が出ます。';
+  drawPickList();
+}
+
+function drawPickList(){
+  const box = document.getElementById('catList');
+  box.innerHTML = '';
+  if(!db.items.length){
+    box.innerHTML = '<div class="empty">登録されたアイテムがありません。</div>';
+    return;
+  }
+  const list = document.createElement('div');
+  list.className = 'picklist';
+
+  db.items.forEach(it=>{
+    const r = document.createElement('div');
+    r.className = 'pickrow';
+
+    const nm = document.createElement('div');
+    nm.className = 'pname'; nm.textContent = it.name;
+    r.appendChild(nm);
+
+    const own = catOf(it.catId);
+    if(own){
+      const o = document.createElement('span');
+      o.className = 'owner' + (it.catId===pickCat ? ' mine' : '');
+      o.textContent = own.name || '（無名）';
+      r.appendChild(o);
+    }
+
+    const b = document.createElement('button');
+    b.className = 'chk' + (picked.has(it.id) ? ' on-buy' : '');
+    b.textContent = '✓';
+    b.onclick = () => {
+      picked.has(it.id) ? picked.delete(it.id) : picked.add(it.id);
+      drawPickList();
+    };
+    r.appendChild(b);
+
+    r.onclick = e => { if(!e.target.closest('button')) b.click(); };
+    list.appendChild(r);
+  });
+  box.appendChild(list);
+}
+
+document.getElementById('catBack').onclick = () => renderCatEditor();
+
+/* まとめて追加：他のカテゴリに入っているものは確認してから移す */
+document.getElementById('catAddItems').onclick = () => {
+  if(!picked.size){ alert('アイテムを選んでください。'); return; }
+  const sel = db.items.filter(i => picked.has(i.id));      // db.items の並び順のまま
+  const free = sel.filter(i => !catOf(i.catId) || i.catId === pickCat);
+  const taken = sel.filter(i => catOf(i.catId) && i.catId !== pickCat);
+
+  free.forEach(i => { i.catId = pickCat; });
+
+  const askOne = i => {
+    const from = catOf(i.catId).name || '（無名）';
+    if(confirm('「'+i.name+'」はすでに「'+from+'」に登録済です。\n\nOK：カテゴリを変更する\nキャンセル：そのまま')){
+      i.catId = pickCat;
+    }
+  };
+
+  if(taken.length === 1){
+    askOne(taken[0]);
+  }else if(taken.length > 1){
+    if(confirm(taken.length + '件がすでに別のカテゴリに登録済です。編集しますか？\n\nOK：上から順に1件ずつ確認する\nキャンセル：カテゴリはそのまま')){
+      taken.forEach(askOne);
+    }else{
+      save(); picked.clear(); renderCatEditor(); return;   // 元の画面に戻る
+    }
+  }
+  save(); picked.clear(); drawPickList();
+  if(!itemMask.classList.contains('hidden')) renderCatChips();
+};
+
+/* まとめて外す：このカテゴリに入っているものだけが対象 */
+document.getElementById('catRemove').onclick = () => {
+  if(!picked.size){ alert('アイテムを選んでください。'); return; }
+  const mine = db.items.filter(i => picked.has(i.id) && i.catId === pickCat);
+  if(!mine.length){ alert('このカテゴリに入っているアイテムが選ばれていません。'); return; }
+  if(!confirm(mine.length + '件を「' + (catOf(pickCat).name || '（無名）') + '」から外します。\n（アイテム自体は残ります）')) return;
+  mine.forEach(i => { i.catId = null; });
+  save(); picked.clear(); drawPickList();
+  if(!itemMask.classList.contains('hidden')) renderCatChips();
+};
 
 /* =========================================================
    長押しドラッグ並べ替え（同じグループ内のみ）
