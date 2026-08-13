@@ -27,8 +27,7 @@
   --accent-light:#f3ab8c;
   --accent-soft:#fbeee8;
   --grad:linear-gradient(135deg,#f3ab8c 0%,#e0745a 100%);
-  --shadow:0 1px 6px rgba(120,110,100,.07);
-  --lift:0 4px 14px rgba(120,110,100,.25);
+  --lift:0 4px 14px rgba(120,110,100,.25);   /* 掴んでいる行の浮き */
 }
 
 /* =========================================================
@@ -49,7 +48,6 @@ body{
   -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
 }
 .row,.erow,.cathead,.pickrow{touch-action:manipulation;}  /* ダブルタップ拡大と遅延クリックを止める */
-.grip{touch-action:none;}
 /* 並べ替え中／シートを開いている間は、下地をスクロールさせない */
 body.dragging,body.dragging .sheet{overflow:hidden;}
 /* iOS では body の overflow:hidden だけでは背後のスクロールが止まらないので、
@@ -534,7 +532,7 @@ const refresh   = () => onHistTab() ? renderHist() : renderList();
    確定処理は箱ごとに持たせるので、種類が増えても分岐が増えない。
    ========================================================= */
 function sortable(commit, cls){
-  const g = el('div', 'group' + (cls ? ' ' + cls : ''));
+  const g = el('div', ('group ' + (cls || '')).trim().replace(/\s+/g, ' '));
   g._commit = commit;                       // (ids) => void
   return g;
 }
