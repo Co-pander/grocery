@@ -454,9 +454,12 @@ const uid   = () => Date.now().toString(36) + Math.random().toString(36).slice(2
 const tagOf = id => db.tags.find(t => t.id === id) || null;
 const catOf = id => db.categories.find(c => c.id === id) || null;
 
-const plannedItems = () =>
-  db.items.filter(i => i.plannedOrder != null).sort((a,b) => a.plannedOrder - b.plannedOrder);
-const restItems = () => db.items.filter(i => i.plannedOrder == null);
+/* 「買う予定かどうか」の判定はここだけ。持ち方を変えてもここを直せば済む */
+const isPlanned = i => i.plannedOrder != null;
+const isRest    = i => !isPlanned(i);
+
+const plannedItems = () => db.items.filter(isPlanned).sort((a,b) => a.plannedOrder - b.plannedOrder);
+const restItems    = () => db.items.filter(isRest);
 
 function todayKey(){
   const d = new Date(), z = n => String(n).padStart(2,'0');
@@ -661,7 +664,7 @@ function section(kind, title, items){
   }else{
     const commit = kind === 'planned'
       ? ids => ids.forEach((id,n) => { const i = db.items.find(x => x.id === id); if(i) i.plannedOrder = n; })
-      : ids => reorderItems(i => i.plannedOrder == null, ids);
+      : ids => reorderItems(isRest, ids);
     viewList.appendChild(itemBox(f.shown, f.filtering, commit));
   }
   if(f.filtering) viewList.appendChild(el('div', 'note', '※ 絞り込み中は並べ替えできません'));
@@ -746,7 +749,7 @@ function drawCategories(shown, filtering){
 
     if(open && mine.length){
       block.appendChild(itemBox(mine, filtering,
-        ids => reorderItems(i => i.plannedOrder == null && i.catId === cat.id, ids)));
+        ids => reorderItems(i => isRest(i) && i.catId === cat.id, ids)));
     }
     if(!filtering) attachDrag(head, block);     // 見出しを長押しでカテゴリごと移動
     wrap.appendChild(block);
@@ -757,7 +760,7 @@ function drawCategories(shown, filtering){
   const loose = shown.filter(i => !catOf(i.catId));
   if(!loose.length) return;
   viewList.appendChild(itemBox(loose, filtering,
-    ids => reorderItems(i => i.plannedOrder == null && !catOf(i.catId), ids), 'loose'));
+    ids => reorderItems(i => isRest(i) && !catOf(i.catId), ids), 'loose'));
 }
 
 function tagChip(t){
@@ -768,7 +771,7 @@ function tagChip(t){
 }
 
 function itemRow(item, draggable){
-  const planned = item.plannedOrder != null;
+  const planned = isPlanned(item);
   const row = el('div', 'row' + (planned ? ' planned' : '') + (item.bought ? ' bought' : ''));
   row.dataset.id = item.id;
   row.appendChild(el('span', 'grip', '⋮⋮'));
@@ -797,7 +800,7 @@ function itemRow(item, draggable){
    5. チェック操作
    ========================================================= */
 function togglePlan(item){
-  if(item.plannedOrder != null){
+  if(isPlanned(item)){
     item.plannedOrder = null;
     if(item.bought){ item.bought = false; dropHistory(item.id); }
   }else{
@@ -808,7 +811,7 @@ function togglePlan(item){
 }
 
 function toggleBuy(item){
-  if(item.plannedOrder == null) return;
+  if(!isPlanned(item)) return;
   item.bought = !item.bought;
   if(item.bought){
     const t = tagOf(item.tagId);
@@ -830,10 +833,20 @@ function dropHistory(itemId){
   db.history = db.history.filter(h => !(h.itemId === itemId && h.date === d));
 }
 
+/* リセットで戻すのは「買った」ものだけ。
+   買えなかったアイテムは次の機会にまた要るので「買う予定」に残す
+   （不要になったら左のチェックを自分で外す）。 */
 $('btnReset').onclick = () => {
-  if(!db.items.some(i => i.plannedOrder != null)) return;
-  if(!confirm('チェックをすべて外して、登録した初期状態に戻します。\n（履歴は残ります）')) return;
-  db.items.forEach(i => { i.plannedOrder = null; i.bought = false; });
+  const bought = db.items.filter(i => i.bought);
+  const left = plannedItems().filter(i => !i.bought).length;
+  if(!bought.length){
+    alert('「買った」チェックの付いたアイテムがありません。\n買う予定から外すときは、左の□のチェックを外してください。');
+    return;
+  }
+  if(!confirm('買った ' + bought.length + ' 件を登録リストに戻します。\n' +
+              (left ? '買っていない ' + left + ' 件は「買う予定」に残ります。\n' : '') +
+              '（履歴は残ります）')) return;
+  bought.forEach(i => { i.plannedOrder = null; i.bought = false; });
   save(); renderList();
 };
 
