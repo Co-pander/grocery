@@ -164,7 +164,8 @@ main{padding:10px 12px 96px;max-width:640px;margin:0 auto;}
 /* =========================================================
    6. カテゴリ（登録リストのまとまり）
    ========================================================= */
-.catblock{margin-bottom:2px;}
+/* 開閉できるまとまり（カテゴリと履歴で共用） */
+.fold{margin-bottom:2px;}
 .cathead{
   display:flex;align-items:center;gap:7px;
   padding:6px 4px;border-bottom:1px solid var(--line);
@@ -175,7 +176,7 @@ main{padding:10px 12px 96px;max-width:640px;margin:0 auto;}
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .cathead .ccount{font-size:11px;color:var(--muted);flex:none;}
-.catblock > .group{padding-left:15px;}
+.fold > .group{padding-left:15px;}
 .group.loose{margin-top:10px;}
 
 /* =========================================================
@@ -733,18 +734,14 @@ function drawCategories(shown, filtering){
     if(filtering && !mine.length) return;      // 絞り込み中は空のカテゴリを出さない
     const open = filtering || cat.open !== false;   // 結果が隠れないよう絞り込み中は必ず開く
 
-    const block = el('div', 'catblock');
+    const block = el('div', 'fold');
     block.dataset.id = cat.id;
 
-    const head = el('div', 'cathead');
-    head.appendChild(el('span', 'caret', open ? '▼' : '▶'));
-    head.appendChild(el('span', 'cname', cat.name || '（無名）'));
-    head.appendChild(el('span', 'ccount', mine.length));
-    head.onclick = () => {
+    const head = foldHead(cat.name || '（無名）', mine.length, open, () => {
       if(filtering) return;
       cat.open = !(cat.open !== false);
       save(); renderList();
-    };
+    });
     block.appendChild(head);
 
     if(open && mine.length){
@@ -853,28 +850,30 @@ function renderHist(){
       'まだ履歴がありません。<br>右の□にチェックを入れると記録されます。';
     return;
   }
-  // 'YYYY-MM' → { 'YYYY-MM-DD' → 件数 } を新しい順に
+  // 'YYYY-MM' → ('YYYY-MM-DD' → その日の記録) を一度の走査でまとめる
   const months = new Map();
   db.history.forEach(h => {
     const m = h.date.slice(0, 7);
-    if(!months.has(m)) months.set(m, new Set());
-    months.get(m).add(h.date);
+    if(!months.has(m)) months.set(m, new Map());
+    const days = months.get(m);
+    if(!days.has(h.date)) days.set(h.date, []);
+    days.get(h.date).push(h);
   });
-  const monthKeys = [...months.keys()].sort().reverse();
+  const newestFirst = keys => [...keys].sort().reverse();
 
-  monthKeys.forEach(m => {
-    const dates = [...months.get(m)].sort().reverse();
-    const count = db.history.filter(h => h.date.slice(0, 7) === m).length;
+  newestFirst(months.keys()).forEach(m => {
+    const days = months.get(m);
+    const count = [...days.values()].reduce((n, list) => n + list.length, 0);
     const open = histOpen.months.has(m);
 
-    const block = el('div', 'catblock');
+    const block = el('div', 'fold');
     block.appendChild(foldHead(
       Number(m.slice(0, 4)) + '年' + Number(m.slice(5, 7)) + '月', count, open,
       () => { toggleIn(histOpen.months, m); renderHist(); }));
 
     if(open){
       const body = el('div', 'histbody');
-      dates.forEach(date => drawHistDate(body, date));
+      newestFirst(days.keys()).forEach(date => body.appendChild(histDate(date, days.get(date))));
       block.appendChild(body);
     }
     viewHist.appendChild(block);
@@ -893,11 +892,9 @@ function foldHead(label, count, open, onToggle, cls){
 }
 const toggleIn = (set, key) => set.has(key) ? set.delete(key) : set.add(key);
 
-function drawHistDate(parent, date){
-  const entries = db.history.filter(h => h.date === date).sort((a,b) => a.order - b.order);
+function histDate(date, entries){
   const open = histOpen.dates.has(date);
-
-  const block = el('div', 'catblock');
+  const block = el('div', 'fold');
   block.appendChild(foldHead(
     date.slice(5).replace('-', '／'), entries.length, open,
     () => { toggleIn(histOpen.dates, date); renderHist(); }, 'sub'));
@@ -907,28 +904,30 @@ function drawHistDate(parent, date){
       ids.forEach((id,n) => { const h = db.history.find(x => x.id === id); if(h) h.order = n; });
       renderHist();
     });
-    entries.forEach(h => {
-      const row = el('div', 'row');
-      row.dataset.id = h.id;
-      row.appendChild(el('span', 'grip', '⋮⋮'));
-
-      const name = el('div', 'name', h.name);
-      name.style.color = 'var(--text)';
-      row.appendChild(name);
-
-      const t = histTag(h);
-      if(t) row.appendChild(tagChip(t));
-
-      const x = el('button', 'row-x', '✕');
-      x.onclick = () => delHistory(h);
-      row.appendChild(x);
-
-      attachDrag(row);
-      box.appendChild(row);
-    });
+    entries.slice().sort((a,b) => a.order - b.order).forEach(h => box.appendChild(histRow(h)));
     block.appendChild(box);
   }
-  parent.appendChild(block);
+  return block;
+}
+
+function histRow(h){
+  const row = el('div', 'row');
+  row.dataset.id = h.id;
+  row.appendChild(el('span', 'grip', '⋮⋮'));
+
+  const name = el('div', 'name', h.name);
+  name.style.color = 'var(--text)';
+  row.appendChild(name);
+
+  const t = histTag(h);
+  if(t) row.appendChild(tagChip(t));
+
+  const x = el('button', 'row-x', '✕');
+  x.onclick = () => delHistory(h);
+  row.appendChild(x);
+
+  attachDrag(row);
+  return row;
 }
 
 function delHistory(h){
