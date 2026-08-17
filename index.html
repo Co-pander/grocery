@@ -179,12 +179,11 @@ main{padding:10px 12px 96px;max-width:640px;margin:0 auto;}
 .group.loose{margin-top:10px;}
 
 /* =========================================================
-   7. 履歴
+   7. 履歴（月 → 日付 → アイテムの3段）
    ========================================================= */
-.hist-date{
-  font-size:12.5px;font-weight:700;color:var(--accent);
-  margin:16px 4px 5px;
-}
+.histbody{padding-left:13px;}
+.cathead.sub .cname{font-size:12.5px;color:var(--muted);}
+.cathead.sub .caret{font-size:8px;}
 
 /* =========================================================
    8. ＋ボタン
@@ -844,6 +843,9 @@ $('btnReset').onclick = () => {
 /* =========================================================
    6. 履歴タブ
    ========================================================= */
+/* 月 → 日付 → アイテムの3段。開閉は覚えず、履歴タブを開くたび全部閉じた状態から始まる */
+const histOpen = {months:new Set(), dates:new Set()};
+
 function renderHist(){
   viewHist.innerHTML = '';
   if(!db.history.length){
@@ -851,15 +853,61 @@ function renderHist(){
       'まだ履歴がありません。<br>右の□にチェックを入れると記録されます。';
     return;
   }
-  const dates = [...new Set(db.history.map(h => h.date))].sort().reverse();
-  dates.forEach(date => {
-    viewHist.appendChild(el('div', 'hist-date', date.replace(/-/g, '／')));
+  // 'YYYY-MM' → { 'YYYY-MM-DD' → 件数 } を新しい順に
+  const months = new Map();
+  db.history.forEach(h => {
+    const m = h.date.slice(0, 7);
+    if(!months.has(m)) months.set(m, new Set());
+    months.get(m).add(h.date);
+  });
+  const monthKeys = [...months.keys()].sort().reverse();
 
+  monthKeys.forEach(m => {
+    const dates = [...months.get(m)].sort().reverse();
+    const count = db.history.filter(h => h.date.slice(0, 7) === m).length;
+    const open = histOpen.months.has(m);
+
+    const block = el('div', 'catblock');
+    block.appendChild(foldHead(
+      Number(m.slice(0, 4)) + '年' + Number(m.slice(5, 7)) + '月', count, open,
+      () => { toggleIn(histOpen.months, m); renderHist(); }));
+
+    if(open){
+      const body = el('div', 'histbody');
+      dates.forEach(date => drawHistDate(body, date));
+      block.appendChild(body);
+    }
+    viewHist.appendChild(block);
+  });
+  viewHist.appendChild(el('div', 'note', '※ 見出しをタップで開閉／長押しで並べ替え（同じ日付の中）／✕ で削除'));
+}
+
+/* 開閉できる見出し（カテゴリと同じ見た目） */
+function foldHead(label, count, open, onToggle, cls){
+  const head = el('div', 'cathead' + (cls ? ' ' + cls : ''));
+  head.appendChild(el('span', 'caret', open ? '▼' : '▶'));
+  head.appendChild(el('span', 'cname', label));
+  head.appendChild(el('span', 'ccount', count));
+  head.onclick = onToggle;
+  return head;
+}
+const toggleIn = (set, key) => set.has(key) ? set.delete(key) : set.add(key);
+
+function drawHistDate(parent, date){
+  const entries = db.history.filter(h => h.date === date).sort((a,b) => a.order - b.order);
+  const open = histOpen.dates.has(date);
+
+  const block = el('div', 'catblock');
+  block.appendChild(foldHead(
+    date.slice(5).replace('-', '／'), entries.length, open,
+    () => { toggleIn(histOpen.dates, date); renderHist(); }, 'sub'));
+
+  if(open){
     const box = sortable(ids => {
       ids.forEach((id,n) => { const h = db.history.find(x => x.id === id); if(h) h.order = n; });
       renderHist();
     });
-    db.history.filter(h => h.date === date).sort((a,b) => a.order - b.order).forEach(h => {
+    entries.forEach(h => {
       const row = el('div', 'row');
       row.dataset.id = h.id;
       row.appendChild(el('span', 'grip', '⋮⋮'));
@@ -878,9 +926,9 @@ function renderHist(){
       attachDrag(row);
       box.appendChild(row);
     });
-    viewHist.appendChild(box);
-  });
-  viewHist.appendChild(el('div', 'note', '※ 長押しで並べ替え（同じ日付の中）／✕ で削除'));
+    block.appendChild(box);
+  }
+  parent.appendChild(block);
 }
 
 function delHistory(h){
@@ -904,6 +952,8 @@ document.querySelectorAll('.tab').forEach(tab => {
     viewList.hidden = !list;
     viewHist.hidden = list;
     $('fab').hidden = !list;
+    // 履歴は開くたびに全部閉じた状態から
+    if(!list){ histOpen.months.clear(); histOpen.dates.clear(); }
     refresh();
   };
 });

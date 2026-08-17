@@ -1,7 +1,7 @@
 /* お買い物リスト PWA service worker
    アプリのデータ（localStorage）はここではなく端末のブラウザに保存されます。
    index.html などを更新したら、必ず下の CACHE の版を上げて sw.js も一緒に再アップロードすること。 */
-const CACHE = "grocery-v12";   // ← 更新のたびに v2, v3… と上げる
+const CACHE = "grocery-v13";   // ← 更新のたびに v2, v3… と上げる
 const ASSETS = [
   "./",
   "./index.html",
