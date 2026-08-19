@@ -182,9 +182,10 @@ main{padding:10px 12px 96px;max-width:640px;margin:0 auto;}
 /* =========================================================
    7. 履歴（月 → 日付 → アイテムの3段）
    ========================================================= */
-.histbody{padding-left:13px;}
-.cathead.sub .cname{font-size:12.5px;color:var(--muted);}
-.cathead.sub .caret{font-size:8px;}
+.histbody{padding-left:10px;}
+.cathead.sub .cname{font-size:12.5px;color:var(--muted);}   /* 月 */
+.cathead.sub2 .cname{font-size:12px;font-weight:600;color:var(--muted);}  /* 日 */
+.cathead.sub .caret,.cathead.sub2 .caret{font-size:8px;}
 
 /* =========================================================
    8. ＋ボタン
@@ -740,10 +741,13 @@ function drawCategories(shown, filtering){
     const block = el('div', 'fold');
     block.dataset.id = cat.id;
 
-    const head = foldHead(cat.name || '（無名）', mine.length, open, () => {
-      if(filtering) return;
-      cat.open = !(cat.open !== false);
-      save(); renderList();
+    const head = foldHead({
+      label: cat.name || '（無名）', count: mine.length, open,
+      onToggle: () => {
+        if(filtering) return;
+        cat.open = !(cat.open !== false);
+        save(); renderList();
+      }
     });
     block.appendChild(head);
 
@@ -853,8 +857,21 @@ $('btnReset').onclick = () => {
 /* =========================================================
    6. 履歴タブ
    ========================================================= */
-/* 月 → 日付 → アイテムの3段。開閉は覚えず、履歴タブを開くたび全部閉じた状態から始まる */
-const histOpen = {months:new Set(), dates:new Set()};
+/* 年 → 月 → 日 → アイテムの4段。
+   開閉は覚えず、履歴タブを開くたび「今年だけ開いた」状態から始まる。 */
+const histOpen = {years:new Set(), months:new Set(), dates:new Set()};
+
+function resetHistFolds(){
+  histOpen.years = new Set([String(new Date().getFullYear())]);
+  histOpen.months.clear();
+  histOpen.dates.clear();
+}
+resetHistFolds();
+
+const newestFirst = keys => [...keys].sort().reverse();
+/* 入れ子のMapをたどって、末端の記録の数を数える */
+const countIn = map =>
+  [...map.values()].reduce((n, v) => n + (Array.isArray(v) ? v.length : countIn(v)), 0);
 
 function renderHist(){
   viewHist.innerHTML = '';
@@ -863,55 +880,68 @@ function renderHist(){
       'まだ履歴がありません。<br>右の□にチェックを入れると記録されます。';
     return;
   }
-  // 'YYYY-MM' → ('YYYY-MM-DD' → その日の記録) を一度の走査でまとめる
-  const months = new Map();
+  // 年 → 月 → 日 → 記録 を一度の走査でまとめる
+  const years = new Map();
   db.history.forEach(h => {
-    const m = h.date.slice(0, 7);
+    const y = h.date.slice(0, 4), m = h.date.slice(0, 7);
+    if(!years.has(y)) years.set(y, new Map());
+    const months = years.get(y);
     if(!months.has(m)) months.set(m, new Map());
     const days = months.get(m);
     if(!days.has(h.date)) days.set(h.date, []);
     days.get(h.date).push(h);
   });
-  const newestFirst = keys => [...keys].sort().reverse();
 
-  newestFirst(months.keys()).forEach(m => {
-    const days = months.get(m);
-    const count = [...days.values()].reduce((n, list) => n + list.length, 0);
-    const open = histOpen.months.has(m);
-
-    const block = el('div', 'fold');
-    block.appendChild(foldHead(
-      Number(m.slice(0, 4)) + '年' + Number(m.slice(5, 7)) + '月', count, open,
-      () => { toggleIn(histOpen.months, m); renderHist(); }));
-
-    if(open){
-      const body = el('div', 'histbody');
-      newestFirst(days.keys()).forEach(date => body.appendChild(histDate(date, days.get(date))));
-      block.appendChild(body);
-    }
-    viewHist.appendChild(block);
-  });
-  viewHist.appendChild(el('div', 'note', '※ 見出しをタップで開閉／長押しで並べ替え（同じ日付の中）／✕ で削除'));
+  newestFirst(years.keys()).forEach(y => viewHist.appendChild(histYear(y, years.get(y))));
+  viewHist.appendChild(el('div', 'note',
+    '※ 見出しをタップで開閉／長押しで並べ替え（同じ日付の中）／✕ で削除'));
 }
 
-/* 開閉できる見出し（カテゴリと同じ見た目） */
-function foldHead(label, count, open, onToggle, cls){
-  const head = el('div', 'cathead' + (cls ? ' ' + cls : ''));
-  head.appendChild(el('span', 'caret', open ? '▼' : '▶'));
-  head.appendChild(el('span', 'cname', label));
-  head.appendChild(el('span', 'ccount', count));
-  head.onclick = onToggle;
-  return head;
+function histYear(year, months){
+  const open = histOpen.years.has(year);
+  const count = countIn(months);
+  const block = el('div', 'fold');
+  block.appendChild(foldHead({
+    label: year + '年', count, open,
+    onToggle: () => { toggleIn(histOpen.years, year); renderHist(); },
+    onDelete: () => delHistRange(year + '年', count, h => h.date.slice(0, 4) === year, true)
+  }));
+  if(open){
+    const body = el('div', 'histbody');
+    newestFirst(months.keys()).forEach(m => body.appendChild(histMonth(m, months.get(m))));
+    block.appendChild(body);
+  }
+  return block;
 }
-const toggleIn = (set, key) => set.has(key) ? set.delete(key) : set.add(key);
+
+function histMonth(ym, days){
+  const open = histOpen.months.has(ym);
+  const count = countIn(days);
+  const label = Number(ym.slice(5, 7)) + '月';
+  const block = el('div', 'fold');
+  block.appendChild(foldHead({
+    label, count, open, cls:'sub',
+    onToggle: () => { toggleIn(histOpen.months, ym); renderHist(); },
+    onDelete: () => delHistRange(Number(ym.slice(0,4)) + '年' + label, count,
+                                 h => h.date.slice(0, 7) === ym, false)
+  }));
+  if(open){
+    const body = el('div', 'histbody');
+    newestFirst(days.keys()).forEach(d => body.appendChild(histDate(d, days.get(d))));
+    block.appendChild(body);
+  }
+  return block;
+}
 
 function histDate(date, entries){
   const open = histOpen.dates.has(date);
   const block = el('div', 'fold');
-  block.appendChild(foldHead(
-    date.slice(5).replace('-', '／'), entries.length, open,
-    () => { toggleIn(histOpen.dates, date); renderHist(); }, 'sub'));
-
+  block.appendChild(foldHead({
+    label: Number(date.slice(8, 10)) + '日', count:entries.length, open, cls:'sub2',
+    onToggle: () => { toggleIn(histOpen.dates, date); renderHist(); },
+    onDelete: () => delHistRange(date.replace(/-/g, '／'), entries.length,
+                                 h => h.date === date, false)
+  }));
   if(open){
     const box = sortable(ids => {
       ids.forEach((id,n) => { const h = db.history.find(x => x.id === id); if(h) h.order = n; });
@@ -922,6 +952,22 @@ function histDate(date, entries){
   }
   return block;
 }
+
+/* 開閉できる見出し（カテゴリと履歴で共用）。onDelete があれば右端に ✕ を出す */
+function foldHead(o){
+  const head = el('div', 'cathead' + (o.cls ? ' ' + o.cls : ''));
+  head.appendChild(el('span', 'caret', o.open ? '▼' : '▶'));
+  head.appendChild(el('span', 'cname', o.label));
+  head.appendChild(el('span', 'ccount', o.count));
+  if(o.onDelete){
+    const x = el('button', 'row-x', '✕');
+    x.onclick = e => { e.stopPropagation(); o.onDelete(); };   // 開閉と取り違えない
+    head.appendChild(x);
+  }
+  head.onclick = o.onToggle;
+  return head;
+}
+const toggleIn = (set, key) => set.has(key) ? set.delete(key) : set.add(key);
 
 function histRow(h){
   const row = el('div', 'row');
@@ -945,12 +991,28 @@ function histRow(h){
 
 function delHistory(h){
   if(!confirm('履歴から「' + h.name + '」を削除しますか？')) return;
-  db.history = db.history.filter(x => x.id !== h.id);
-  // 当日の記録を消したら、リスト側の「買った」チェックも外して食い違いを防ぐ
-  if(h.date === todayKey()){
+  dropMatching(x => x.id === h.id);
+}
+
+/* 年・月・日をまとめて削除。年だけは件数が大きいので確認を2回出す */
+function delHistRange(label, count, match, twice){
+  const warn = db.history.some(h => match(h) && h.date === todayKey())
+    ? '\n※ 本日分が含まれるため、リストの「買った」チェックも外れます。' : '';
+  if(!confirm(label + 'の履歴 ' + count + ' 件をすべて削除しますか？\n' +
+              'この操作は元に戻せません。' + warn)) return;
+  if(twice && !confirm('本当に削除しますか？\n' + label + 'の ' + count + ' 件が消えます。')) return;
+  dropMatching(match);
+}
+
+/* 条件に合う記録を消し、当日分ならリスト側の「買った」チェックも外して食い違いを防ぐ */
+function dropMatching(match){
+  const today = todayKey();
+  db.history.filter(match).forEach(h => {
+    if(h.date !== today) return;
     const it = db.items.find(i => i.id === h.itemId);
     if(it) it.bought = false;
-  }
+  });
+  db.history = db.history.filter(h => !match(h));
   save(); renderHist(); renderList();
 }
 
@@ -964,8 +1026,7 @@ document.querySelectorAll('.tab').forEach(tab => {
     viewList.hidden = !list;
     viewHist.hidden = list;
     $('fab').hidden = !list;
-    // 履歴は開くたびに全部閉じた状態から
-    if(!list){ histOpen.months.clear(); histOpen.dates.clear(); }
+    if(!list) resetHistFolds();   // 履歴は開くたび「今年だけ開いた」状態に戻す
     refresh();
   };
 });
