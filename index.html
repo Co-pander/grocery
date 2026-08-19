@@ -896,13 +896,16 @@ function renderHist(){
       'まだ履歴がありません。<br>右の□にチェックを入れると記録されます。';
     return;
   }
-  const q = histQuery.trim().toLowerCase();
-  const found = q ? db.history.filter(h => h.name.toLowerCase().includes(q)) : db.history;
+  const q = histQuery.trim();
+  const searching = q !== '';
+  const found = searching
+    ? db.history.filter(h => h.name.toLowerCase().includes(q.toLowerCase()))
+    : db.history;
 
-  if(q){
+  if(searching){
     viewHist.appendChild(el('div', 'note',
-      found.length ? '「' + histQuery.trim() + '」に一致 ' + found.length + ' 件'
-                   : '「' + histQuery.trim() + '」に一致する履歴はありません。'));
+      found.length ? '「' + q + '」に一致 ' + found.length + ' 件'
+                   : '「' + q + '」に一致する履歴はありません。'));
     if(!found.length) return;
   }
 
@@ -918,45 +921,45 @@ function renderHist(){
     days.get(h.date).push(h);
   });
 
-  newestFirst(years.keys()).forEach(y => viewHist.appendChild(histYear(y, years.get(y))));
+  newestFirst(years.keys()).forEach(y => viewHist.appendChild(histYear(y, years.get(y), searching)));
   viewHist.appendChild(el('div', 'note',
     '※ タップでリスト詳細／長押しでアイテムを並べ替え（同じ日付の中）／✕ で削除'));
 }
-const searching = () => histQuery.trim() !== '';
 
-function histYear(year, months){
-  const open = searching() || histOpen.years.has(year);
+function histYear(year, months, searching){
+  const open = searching || histOpen.years.has(year);
   const count = countIn(months);
   const block = el('div', 'fold');
   block.appendChild(foldHead({
     label: year + '年', count, open,
     onToggle: () => { toggleIn(histOpen.years, year); renderHist(); },
-    onDelete: searching() ? null
+    onDelete: searching ? null
       : () => delHistRange(year + '年', count, h => h.date.slice(0, 4) === year, true)
   }));
   if(open){
     const body = el('div', 'histbody');
-    newestFirst(months.keys()).forEach(m => body.appendChild(histMonth(m, months.get(m))));
+    newestFirst(months.keys())
+      .forEach(m => body.appendChild(histMonth(m, months.get(m), searching)));
     block.appendChild(body);
   }
   return block;
 }
 
-function histMonth(ym, days){
-  const open = searching() || histOpen.months.has(ym);
+function histMonth(ym, days, searching){
+  const open = searching || histOpen.months.has(ym);
   const count = countIn(days);
   const label = Number(ym.slice(5, 7)) + '月';
   const block = el('div', 'fold');
   block.appendChild(foldHead({
     label, count, open, cls:'sub',
     onToggle: () => { toggleIn(histOpen.months, ym); renderHist(); },
-    onDelete: searching() ? null
+    onDelete: searching ? null
       : () => delHistRange(Number(ym.slice(0,4)) + '年' + label, count,
                            h => h.date.slice(0, 7) === ym, false)
   }));
   if(open){
     const body = el('div', 'histbody');
-    newestFirst(days.keys()).forEach(d => body.appendChild(histDate(d, days.get(d))));
+    newestFirst(days.keys()).forEach(d => body.appendChild(histDate(d, days.get(d), searching)));
     block.appendChild(body);
   }
   return block;
@@ -969,26 +972,26 @@ function weekdayOf(date){
   return WEEKDAYS[new Date(y, m - 1, d).getDay()];
 }
 
-function histDate(date, entries){
-  const open = searching() || histOpen.dates.has(date);
-  const label = Number(date.slice(8, 10)) + '日（' + weekdayOf(date) + '）';
+function histDate(date, entries, searching){
+  const open = searching || histOpen.dates.has(date);
+  const wd = weekdayOf(date);
   const block = el('div', 'fold');
   block.appendChild(foldHead({
-    label, count:entries.length, open, cls:'sub2',
+    label: Number(date.slice(8, 10)) + '日（' + wd + '）',
+    count:entries.length, open, cls:'sub2',
     onToggle: () => { toggleIn(histOpen.dates, date); renderHist(); },
-    onDelete: searching() ? null
-      : () => delHistRange(date.replace(/-/g, '／') + '（' + weekdayOf(date) + '）',
+    onDelete: searching ? null
+      : () => delHistRange(date.replace(/-/g, '／') + '（' + wd + '）',
                            entries.length, h => h.date === date, false)
   }));
   if(open){
+    // 検索中は一部しか出ていないので並べ替えは止める
     const box = sortable(ids => {
       ids.forEach((id,n) => { const h = db.history.find(x => x.id === id); if(h) h.order = n; });
       renderHist();
-    });
-    // 検索中は一部しか出ていないので並べ替えは止める
+    }, searching ? 'filtered' : '');
     entries.slice().sort((a,b) => a.order - b.order)
-      .forEach(h => box.appendChild(histRow(h, !searching())));
-    if(searching()) box.classList.add('filtered');
+      .forEach(h => box.appendChild(histRow(h, !searching)));
     block.appendChild(box);
   }
   return block;
