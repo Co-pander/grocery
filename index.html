@@ -69,14 +69,18 @@ header{
   padding:calc(env(safe-area-inset-top) + 12px) 14px 0;
   border-bottom:1px solid var(--line);
 }
-.hd-row{display:flex;align-items:center;gap:8px;}
-.hd-title{font-size:16px;font-weight:700;flex:1;letter-spacing:.06em;}
+.hd-row{display:flex;align-items:center;gap:6px;}
+.hd-title{
+  font-size:16px;font-weight:700;flex:1;letter-spacing:.04em;
+  white-space:nowrap;min-width:0;
+}
 .hd-btn{
   background:none;border:1px solid var(--line);color:var(--muted);
-  font-size:11.5px;padding:6px 12px;border-radius:999px;font-weight:700;
-  font-family:inherit;
+  font-size:11px;padding:6px 9px;border-radius:999px;font-weight:700;
+  font-family:inherit;white-space:nowrap;flex:none;
 }
 .hd-btn:active{background:var(--accent-soft);color:var(--accent);border-color:var(--accent-light);}
+#btnData{padding:6px 10px;letter-spacing:1px;}   /* ⋯ は幅を詰める */
 .tabs{display:flex;margin-top:10px;}
 .tab{
   flex:1;text-align:center;padding:10px 0 9px;font-size:13.5px;font-weight:700;
@@ -160,6 +164,11 @@ main{padding:10px 12px 96px;max-width:640px;margin:0 auto;}
 .fchip.on{border-color:transparent;}
 .fchip.all.on{background:var(--accent);color:#fff;}
 .note{font-size:10.5px;color:var(--muted);margin:5px 4px 0;}
+/* 画面のいちばん下に控えめに置く備忘 */
+.backup-note{
+  font-size:10.5px;color:var(--faint);margin:22px 4px 0;text-align:center;
+  -webkit-user-select:none;user-select:none;
+}
 
 /* =========================================================
    6. カテゴリ（登録リストのまとまり）
@@ -346,6 +355,7 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
     <button class="hd-btn" id="btnTags">タグ</button>
     <button class="hd-btn" id="btnCats">カテゴリ</button>
     <button class="hd-btn" id="btnReset">リセット</button>
+    <button class="hd-btn" id="btnData" title="データ">⋯</button>
   </div>
   <div class="tabs">
     <div class="tab active" data-tab="list">リスト</div>
@@ -401,6 +411,29 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
     <p class="hint">名前は<b>ダブルタップ</b>で編集、色は左の四角をタップ。<br>
       行を<b>長押ししてドラッグ</b>すると並べ替えできます。<br>
       名前が空のタグは閉じるときに削除されます。</p>
+  </div>
+</div>
+
+<!-- データのバックアップ／復元 -->
+<div class="mask hidden" id="dataMask">
+  <div class="sheet">
+    <h2>データのバックアップ</h2>
+    <p class="hint" id="dataSummary"></p>
+    <div class="btns">
+      <button class="btn primary" id="btnExport">CSVで書き出す</button>
+    </div>
+    <div class="btns">
+      <button class="btn ghost" id="btnImport">CSVから復元する</button>
+    </div>
+    <div class="btns">
+      <button class="btn ghost" id="dataClose">閉じる</button>
+    </div>
+    <input type="file" id="restoreFile" accept=".csv,text/csv" hidden>
+    <p class="hint">
+      アイテム・カテゴリ・タグ・並び順・履歴のすべてを1つのCSVに書き出します。<br>
+      <b>復元すると今のデータはすべて置き換わります。</b>念のため、復元の直前に現在のデータを自動で書き出します。<br>
+      書き出したファイルは、メールやクラウドなど<b>端末の外</b>に保管してください。
+    </p>
   </div>
 </div>
 
@@ -661,6 +694,11 @@ function renderList(){
   const planned = plannedItems(), rest = restItems();
   if(planned.length) section('planned', '買う予定', planned);
   if(rest.length)    section('rest',    '登録リスト', rest);
+
+  // 控えめな備忘。⋯ ボタンから書き出せる
+  const foot = el('div', 'backup-note', 'バックアップ：' + lastBackupText());
+  foot.onclick = () => { drawDataSummary(); openSheet(dataMask); };
+  viewList.appendChild(foot);
 }
 
 function section(kind, title, items){
@@ -1478,7 +1516,179 @@ function afterPick(){
 }
 
 /* =========================================================
-   13. 起動
+   13. バックアップ（CSV 1ファイル・先頭が種別の列）
+   ---------------------------------------------------------
+   4種類の表を1枚に収めるので、列は全種類の合併。使わない列は空にする。
+   行の順序がそのまま並び順なので、書き出し順＝表示順を保つこと。
+   ========================================================= */
+const BACKUP_VERSION = 'grocery-backup-1';
+const COLS = ['type','id','name','color','tagId','catId','plannedOrder','bought','open',
+              'itemId','date','order','tagName','tagColor'];
+
+/* --- CSVの組み立て（RFC4180。カンマ・改行・引用符を含む名前でも壊れない） --- */
+const csvCell = v => {
+  const s = (v === null || v === undefined) ? '' : String(v);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
+const toCSV = rows => rows.map(r => r.map(csvCell).join(',')).join('\r\n');
+
+function parseCSV(text){
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  text = text.replace(/^﻿/, '');            // Excelが付けるBOMを外す
+  for(let i = 0; i < text.length; i++){
+    const c = text[i];
+    if(quoted){
+      if(c !== '"'){ cell += c; }
+      else if(text[i+1] === '"'){ cell += '"'; i++; }   // "" は引用符1つ
+      else quoted = false;
+    }else if(c === '"'){ quoted = true; }
+    else if(c === ','){ row.push(cell); cell = ''; }
+    else if(c === '\n'){ row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if(c !== '\r'){ cell += c; }
+  }
+  if(cell !== '' || row.length){ row.push(cell); rows.push(row); }
+  return rows;
+}
+
+function buildBackup(){
+  const rows = [COLS];
+  const put = o => rows.push(COLS.map(c => o[c] === null || o[c] === undefined ? '' : o[c]));
+  put({type:'meta', name:BACKUP_VERSION, date:todayKey()});
+  db.tags.forEach(t => put({type:'tag', id:t.id, name:t.name, color:t.color}));
+  db.categories.forEach(c => put({type:'cat', id:c.id, name:c.name, open:c.open !== false}));
+  db.items.forEach(i => put({type:'item', id:i.id, name:i.name, tagId:i.tagId, catId:i.catId,
+                             plannedOrder:i.plannedOrder, bought:i.bought}));
+  db.history.forEach(h => put({type:'hist', id:h.id, name:h.name, itemId:h.itemId, date:h.date,
+                               order:h.order, tagName:h.tagName, tagColor:h.tagColor}));
+  return toCSV(rows);
+}
+
+/* 読み込みは、壊れたファイルで今のデータを壊さないよう「全部読めてから」返す */
+function parseBackup(text){
+  const rows = parseCSV(text).filter(r => r.some(c => c !== ''));
+  if(!rows.length) throw new Error('ファイルの中身が空です。');
+  const head = rows[0].map(s => s.trim());
+  if(head[0] !== 'type') throw new Error('このアプリのバックアップファイルではないようです。');
+
+  const at = {};
+  head.forEach((h, i) => { at[h] = i; });
+  const raw  = (r, c) => at[c] === undefined ? '' : (r[at[c]] ?? '');
+  const trim = (r, c) => raw(r, c).trim();
+  const numOrNull = v => v === '' ? null : Number(v);
+
+  const data = {tags:[], categories:[], items:[], history:[]};
+  rows.slice(1).forEach(r => {
+    switch(trim(r, 'type')){
+      case 'tag':
+        data.tags.push({id:trim(r,'id'), name:raw(r,'name'), color:trim(r,'color') || '#cccccc'});
+        break;
+      case 'cat':
+        data.categories.push({id:trim(r,'id'), name:raw(r,'name'), open:trim(r,'open') !== 'false'});
+        break;
+      case 'item':
+        data.items.push({
+          id:trim(r,'id'), name:raw(r,'name'),
+          tagId:trim(r,'tagId') || null, catId:trim(r,'catId') || null,
+          plannedOrder:numOrNull(trim(r,'plannedOrder')),
+          bought:trim(r,'bought') === 'true'
+        });
+        break;
+      case 'hist':
+        data.history.push({
+          id:trim(r,'id'), itemId:trim(r,'itemId'), date:trim(r,'date'),
+          order:Number(trim(r,'order')) || 0, name:raw(r,'name'),
+          tagName:raw(r,'tagName') || null, tagColor:trim(r,'tagColor') || null
+        });
+        break;
+    }
+  });
+  const total = data.tags.length + data.categories.length + data.items.length + data.history.length;
+  if(!total) throw new Error('読み取れるデータが1件もありませんでした。');
+  return data;
+}
+
+function downloadCSV(text, suffix){
+  const d = todayKey().replace(/-/g, '');
+  const blob = new Blob(['﻿' + text], {type:'text/csv;charset=utf-8'});  // BOM付き＝Excelで文字化けしない
+  const url = URL.createObjectURL(blob);
+  const a = el('a');
+  a.href = url;
+  a.download = 'grocery_backup_' + d + (suffix || '') + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* --- 画面 --- */
+const dataMask = $('dataMask');
+$('btnData').onclick = () => { drawDataSummary(); openSheet(dataMask); };
+$('dataClose').onclick = () => closeSheet(dataMask);
+
+function drawDataSummary(){
+  $('dataSummary').innerHTML =
+    'アイテム ' + db.items.length + ' 件／カテゴリ ' + db.categories.length +
+    ' 件／タグ ' + db.tags.length + ' 件／履歴 ' + db.history.length + ' 件<br>' +
+    '前回の書き出し：' + lastBackupText();
+}
+
+function lastBackupText(){
+  if(!db.lastBackup) return 'まだありません';
+  const days = daysSince(db.lastBackup);
+  return db.lastBackup.replace(/-/g, '/') +
+         (days === 0 ? '（今日）' : '（' + days + '日前）');
+}
+function daysSince(date){
+  const [y,m,d] = date.split('-').map(Number);
+  const then = new Date(y, m-1, d), now = new Date();
+  return Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - then) / 86400000);
+}
+
+$('btnExport').onclick = () => {
+  downloadCSV(buildBackup());
+  db.lastBackup = todayKey();
+  save();
+  drawDataSummary();
+  renderList();
+};
+
+$('btnImport').onclick = () => $('restoreFile').click();
+
+$('restoreFile').onchange = e => {
+  const file = e.target.files[0];
+  e.target.value = '';                       // 同じファイルを続けて選べるように
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onerror = () => alert('ファイルを読み込めませんでした。');
+  reader.onload = () => {
+    let data;
+    try{
+      data = parseBackup(String(reader.result));
+    }catch(err){
+      alert('復元できませんでした。\n' + err.message);
+      return;
+    }
+    if(!confirm('今のデータをすべて置き換えます。\n\n' +
+                '　アイテム ' + db.items.length + ' → ' + data.items.length + ' 件\n' +
+                '　カテゴリ ' + db.categories.length + ' → ' + data.categories.length + ' 件\n' +
+                '　タグ ' + db.tags.length + ' → ' + data.tags.length + ' 件\n' +
+                '　履歴 ' + db.history.length + ' → ' + data.history.length + ' 件\n\n' +
+                'この操作は元に戻せません。\n※ 念のため、今のデータを先に書き出します。')) return;
+
+    downloadCSV(buildBackup(), '_復元前');    // 間違えても戻せるように
+    Object.assign(db, data);
+    save();
+    closeSheet(dataMask);
+    resetHistFolds();
+    refresh();
+    alert('復元しました。');
+  };
+  reader.readAsText(file);
+};
+
+/* =========================================================
+   14. 起動
    ========================================================= */
 $('histQ').oninput = e => { histQuery = e.target.value; renderHist(); };
 resetHistFolds();
