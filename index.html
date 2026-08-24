@@ -1577,6 +1577,15 @@ function parseBackup(text){
   const trim = (r, c) => raw(r, c).trim();
   const numOrNull = v => v === '' ? null : Number(v);
 
+  /* Excelで開いて保存し直すと 2026-08-13 が 2026/8/13 になることがある。
+     そのままだと年月の切り出しが壊れるので、ここで元の形にそろえる。 */
+  let badDates = 0;
+  const asDate = v => {
+    const m = v.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+    if(!m){ if(v) badDates++; return v; }
+    return m[1] + '-' + String(m[2]).padStart(2,'0') + '-' + String(m[3]).padStart(2,'0');
+  };
+
   const data = {tags:[], categories:[], items:[], history:[]};
   rows.slice(1).forEach(r => {
     switch(trim(r, 'type')){
@@ -1596,7 +1605,7 @@ function parseBackup(text){
         break;
       case 'hist':
         data.history.push({
-          id:trim(r,'id'), itemId:trim(r,'itemId'), date:trim(r,'date'),
+          id:trim(r,'id'), itemId:trim(r,'itemId'), date:asDate(trim(r,'date')),
           order:Number(trim(r,'order')) || 0, name:raw(r,'name'),
           tagName:raw(r,'tagName') || null, tagColor:trim(r,'tagColor') || null
         });
@@ -1605,6 +1614,7 @@ function parseBackup(text){
   });
   const total = data.tags.length + data.categories.length + data.items.length + data.history.length;
   if(!total) throw new Error('読み取れるデータが1件もありませんでした。');
+  data.badDates = badDates;
   return data;
 }
 
@@ -1630,6 +1640,7 @@ function downloadCSV(text, suffix){
   a.click();
   a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return a.download;
 }
 
 /* --- 画面 --- */
@@ -1657,11 +1668,18 @@ function daysSince(date){
 }
 
 $('btnExport').onclick = () => {
-  downloadCSV(buildBackup());
+  const name = downloadCSV(buildBackup());
   db.lastBackup = todayKey();
   save();
   drawDataSummary();
   renderList();
+  // 保存されたことと置き場所が分かるように、ファイル名を添えて知らせる
+  setTimeout(() => alert(
+    'ダウンロードが完了しました。\n\n' + name + '\n\n' +
+    'アイテム ' + db.items.length + ' 件／カテゴリ ' + db.categories.length +
+    ' 件／タグ ' + db.tags.length + ' 件／履歴 ' + db.history.length + ' 件\n' +
+    '端末の「ダウンロード」フォルダに保存されています。'
+  ), 100);
 };
 
 $('btnImport').onclick = () => $('restoreFile').click();
@@ -1685,9 +1703,12 @@ $('restoreFile').onchange = e => {
                 '　カテゴリ ' + db.categories.length + ' → ' + data.categories.length + ' 件\n' +
                 '　タグ ' + db.tags.length + ' → ' + data.tags.length + ' 件\n' +
                 '　履歴 ' + db.history.length + ' → ' + data.history.length + ' 件\n\n' +
+                (data.badDates ? '\n※ 読み取れない日付が ' + data.badDates + ' 件あります。\n' +
+                                 '　その履歴は日付の並びが崩れる場合があります。\n' : '') +
                 'この操作は元に戻せません。\n※ 念のため、今のデータを先にダウンロードします。')) return;
 
     downloadCSV(buildBackup(), '_復元前');    // 間違えても戻せるように
+    delete data.badDates;
     Object.assign(db, data);
     save();
     closeSheet(dataMask);
