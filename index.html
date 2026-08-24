@@ -420,7 +420,7 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
     <h2>データのバックアップ</h2>
     <p class="hint" id="dataSummary"></p>
     <div class="btns">
-      <button class="btn primary" id="btnExport">CSVで書き出す</button>
+      <button class="btn primary" id="btnExport">CSVでダウンロード</button>
     </div>
     <div class="btns">
       <button class="btn ghost" id="btnImport">CSVから復元する</button>
@@ -430,9 +430,9 @@ input[type=text]:focus{outline:2px solid var(--accent-soft);border-color:var(--a
     </div>
     <input type="file" id="restoreFile" accept=".csv,text/csv" hidden>
     <p class="hint">
-      アイテム・カテゴリ・タグ・並び順・履歴のすべてを1つのCSVに書き出します。<br>
-      <b>復元すると今のデータはすべて置き換わります。</b>念のため、復元の直前に現在のデータを自動で書き出します。<br>
-      書き出したファイルは、メールやクラウドなど<b>端末の外</b>に保管してください。
+      アイテム・カテゴリ・タグ・並び順・履歴のすべてを1つのCSVにまとめてダウンロードします。<br>
+      <b>復元すると今のデータはすべて置き換わります。</b>念のため、復元の直前に現在のデータを自動でダウンロードします。<br>
+      ダウンロードしたファイルは、メールやクラウドなど<b>端末の外</b>に保管してください。
     </p>
   </div>
 </div>
@@ -1608,13 +1608,24 @@ function parseBackup(text){
   return data;
 }
 
+/* 日付＋時刻。毎回ちがう名前になるので「もう一度ダウンロードしますか？」が出ない。
+   同じ秒に続けて押された場合だけ連番を足して、名前の重複を確実に避ける。 */
+let lastStamp = '', stampSeq = 0;
+function fileStamp(){
+  const d = new Date(), z = n => String(n).padStart(2, '0');
+  const s = '' + d.getFullYear() + z(d.getMonth()+1) + z(d.getDate()) +
+            '_' + z(d.getHours()) + z(d.getMinutes()) + z(d.getSeconds());
+  if(s === lastStamp) return s + '-' + (++stampSeq);
+  lastStamp = s; stampSeq = 0;
+  return s;
+}
+
 function downloadCSV(text, suffix){
-  const d = todayKey().replace(/-/g, '');
   const blob = new Blob(['﻿' + text], {type:'text/csv;charset=utf-8'});  // BOM付き＝Excelで文字化けしない
   const url = URL.createObjectURL(blob);
   const a = el('a');
   a.href = url;
-  a.download = 'grocery_backup_' + d + (suffix || '') + '.csv';
+  a.download = 'grocery_backup_' + fileStamp() + (suffix || '') + '.csv';
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -1630,7 +1641,7 @@ function drawDataSummary(){
   $('dataSummary').innerHTML =
     'アイテム ' + db.items.length + ' 件／カテゴリ ' + db.categories.length +
     ' 件／タグ ' + db.tags.length + ' 件／履歴 ' + db.history.length + ' 件<br>' +
-    '前回の書き出し：' + lastBackupText();
+    '前回のダウンロード：' + lastBackupText();
 }
 
 function lastBackupText(){
@@ -1674,7 +1685,7 @@ $('restoreFile').onchange = e => {
                 '　カテゴリ ' + db.categories.length + ' → ' + data.categories.length + ' 件\n' +
                 '　タグ ' + db.tags.length + ' → ' + data.tags.length + ' 件\n' +
                 '　履歴 ' + db.history.length + ' → ' + data.history.length + ' 件\n\n' +
-                'この操作は元に戻せません。\n※ 念のため、今のデータを先に書き出します。')) return;
+                'この操作は元に戻せません。\n※ 念のため、今のデータを先にダウンロードします。')) return;
 
     downloadCSV(buildBackup(), '_復元前');    // 間違えても戻せるように
     Object.assign(db, data);
