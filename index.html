@@ -118,6 +118,29 @@ main{padding:10px 12px 96px;max-width:640px;margin:0 auto;}
 /* 登録リストのアイテムは文字が薄いので、タグの濃さもそれに合わせる */
 .row:not(.planned) .tag{opacity:.45;}
 
+/* 個数（買う予定の行だけ）。
+   枠の幅を固定してあるので、1個（＋だけ）でも2個以上（ステッパー）でも
+   同じ幅を占め、結果としてタグの右端が行をまたいでそろう。 */
+.qtywrap{
+  display:flex;align-items:center;justify-content:flex-start;
+  flex:none;width:62px;
+}
+.qty-add{
+  background:none;border:0;color:var(--faint);font-size:15px;font-weight:700;
+  width:20px;height:22px;padding:0;line-height:1;font-family:inherit;
+}
+.qty{
+  display:flex;align-items:center;
+  border:1px solid var(--line);border-radius:999px;background:var(--card);
+}
+.qty button{
+  background:none;border:0;color:var(--accent);font-size:14px;font-weight:700;
+  width:20px;height:21px;padding:0;line-height:1;font-family:inherit;
+}
+.qty button:disabled{color:var(--faint);}
+.qty .n{font-size:12px;font-weight:700;color:var(--text);min-width:20px;text-align:center;}
+.row.planned .tag{max-width:32%;}   /* 個数のぶんタグを控えめに */
+
 .grip{color:var(--faint);font-size:12px;flex:none;letter-spacing:-1px;}
 .row-x{
   background:none;border:0;color:var(--faint);font-size:13px;
@@ -490,7 +513,10 @@ function load(){
   // 古い版のデータを今の形にそろえる
   s.categories = s.categories || [];
   s.history    = s.history || [];
-  s.items.forEach(i => { if(i.catId === undefined) i.catId = null; });
+  s.items.forEach(i => {
+    if(i.catId === undefined) i.catId = null;
+    if(i.qty === undefined) i.qty = 1;
+  });
   return s;
 }
 const save = () => localStorage.setItem(KEY, JSON.stringify(db));
@@ -836,6 +862,8 @@ function itemRow(item, draggable){
   const t = tagOf(item.tagId);
   if(t) row.appendChild(tagChip(t));
 
+  if(planned) row.appendChild(qtyControl(item));   // 個数は買う予定のときだけ
+
   const plan = el('button', 'chk' + (planned ? ' on-plan' : ''), '✓');   // 左：買う予定
   plan.onclick = () => togglePlan(item);
   row.appendChild(plan);
@@ -849,12 +877,46 @@ function itemRow(item, draggable){
   return row;
 }
 
+/* 個数はリスト上のメモなので履歴には残さない。
+   1のときは薄い＋だけ置き、2以上でステッパーを出す（行の幅を使わないため）。
+   その場で描き替えるだけにして、全体の再描画で画面が動かないようにする。 */
+const qtyOf = item => item.qty || 1;
+
+function qtyControl(item){
+  const wrap = el('span', 'qtywrap');
+  const set = n => { item.qty = Math.max(1, Math.min(99, n)); save(); draw(); };
+
+  function draw(){
+    wrap.innerHTML = '';
+    const n = qtyOf(item);
+    if(n <= 1){
+      const add = el('button', 'qty-add', '＋');
+      add.onclick = () => set(2);
+      wrap.appendChild(add);
+      return;
+    }
+    const box = el('div', 'qty');
+    const minus = el('button', null, '−');
+    minus.onclick = () => set(n - 1);
+    const plus = el('button', null, '＋');
+    plus.disabled = n >= 99;
+    plus.onclick = () => set(n + 1);
+    box.appendChild(minus);
+    box.appendChild(el('span', 'n', n));
+    box.appendChild(plus);
+    wrap.appendChild(box);
+  }
+  draw();
+  return wrap;
+}
+
 /* =========================================================
    5. チェック操作
    ========================================================= */
 function togglePlan(item){
   if(isPlanned(item)){
     item.plannedOrder = null;
+    item.qty = 1;                     // 個数は今回の買い物のメモなので持ち越さない
     if(item.bought){ item.bought = false; dropHistory(item.id); }
   }else{
     // 新しくチェックしたものは「買う予定」の一番下に付く
@@ -899,7 +961,7 @@ $('btnReset').onclick = () => {
   if(!confirm('買った ' + bought.length + ' 件を登録リストに戻します。\n' +
               (left ? '買っていない ' + left + ' 件は「買う予定」に残ります。\n' : '') +
               '（履歴は残ります）')) return;
-  bought.forEach(i => { i.plannedOrder = null; i.bought = false; });
+  bought.forEach(i => { i.plannedOrder = null; i.bought = false; i.qty = 1; });
   save(); renderList();
 };
 
@@ -1522,7 +1584,7 @@ function afterPick(){
    行の順序がそのまま並び順なので、書き出し順＝表示順を保つこと。
    ========================================================= */
 const BACKUP_VERSION = 'grocery-backup-1';
-const COLS = ['type','id','name','color','tagId','catId','plannedOrder','bought','open',
+const COLS = ['type','id','name','color','tagId','catId','plannedOrder','bought','qty','open',
               'itemId','date','order','tagName','tagColor'];
 
 /* --- CSVの組み立て（RFC4180。カンマ・改行・引用符を含む名前でも壊れない） --- */
@@ -1558,7 +1620,7 @@ function buildBackup(){
   db.tags.forEach(t => put({type:'tag', id:t.id, name:t.name, color:t.color}));
   db.categories.forEach(c => put({type:'cat', id:c.id, name:c.name, open:c.open !== false}));
   db.items.forEach(i => put({type:'item', id:i.id, name:i.name, tagId:i.tagId, catId:i.catId,
-                             plannedOrder:i.plannedOrder, bought:i.bought}));
+                             plannedOrder:i.plannedOrder, bought:i.bought, qty:qtyOf(i)}));
   db.history.forEach(h => put({type:'hist', id:h.id, name:h.name, itemId:h.itemId, date:h.date,
                                order:h.order, tagName:h.tagName, tagColor:h.tagColor}));
   return toCSV(rows);
@@ -1600,7 +1662,8 @@ function parseBackup(text){
           id:trim(r,'id'), name:raw(r,'name'),
           tagId:trim(r,'tagId') || null, catId:trim(r,'catId') || null,
           plannedOrder:numOrNull(trim(r,'plannedOrder')),
-          bought:trim(r,'bought') === 'true'
+          bought:trim(r,'bought') === 'true',
+          qty:Number(trim(r,'qty')) || 1        // 個数の列がない古いファイルは1として読む
         });
         break;
       case 'hist':
