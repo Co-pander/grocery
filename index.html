@@ -1240,7 +1240,7 @@ $('itemSave').onclick = () => {
     Object.assign(editing, {name, tagId:pickedTag, catId:pickedCat});
   }else{
     db.items.push({id:uid(), name, tagId:pickedTag, catId:pickedCat,
-                   plannedOrder:null, bought:false});
+                   plannedOrder:null, bought:false, qty:1});
   }
   save(); closeSheet(itemMask); renderList();
 };
@@ -1711,11 +1711,13 @@ const dataMask = $('dataMask');
 $('btnData').onclick = () => { drawDataSummary(); openSheet(dataMask); };
 $('dataClose').onclick = () => closeSheet(dataMask);
 
+/* 何件を扱ったのかは画面でも完了メッセージでも使うので一箇所に */
+const countsText = () =>
+  'アイテム ' + db.items.length + ' 件／カテゴリ ' + db.categories.length +
+  ' 件／タグ ' + db.tags.length + ' 件／履歴 ' + db.history.length + ' 件';
+
 function drawDataSummary(){
-  $('dataSummary').innerHTML =
-    'アイテム ' + db.items.length + ' 件／カテゴリ ' + db.categories.length +
-    ' 件／タグ ' + db.tags.length + ' 件／履歴 ' + db.history.length + ' 件<br>' +
-    '前回のダウンロード：' + lastBackupText();
+  $('dataSummary').innerHTML = countsText() + '<br>前回のダウンロード：' + lastBackupText();
 }
 
 function lastBackupText(){
@@ -1738,9 +1740,7 @@ $('btnExport').onclick = () => {
   renderList();
   // 保存されたことと置き場所が分かるように、ファイル名を添えて知らせる
   setTimeout(() => alert(
-    'ダウンロードが完了しました。\n\n' + name + '\n\n' +
-    'アイテム ' + db.items.length + ' 件／カテゴリ ' + db.categories.length +
-    ' 件／タグ ' + db.tags.length + ' 件／履歴 ' + db.history.length + ' 件\n' +
+    'ダウンロードが完了しました。\n\n' + name + '\n\n' + countsText() + '\n' +
     '端末の「ダウンロード」フォルダに保存されています。'
   ), 100);
 };
